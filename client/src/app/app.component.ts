@@ -41,6 +41,8 @@ export class AppComponent implements OnInit, AfterViewChecked, OnDestroy {
   showContextPanel = false;
   isSpeaking = false;
   ttsEnabled = true;
+  liveInterimText = '';
+  liveInterimFinal = false;
   private shouldScrollChat = false;
   private lastTranscript = '';
   private speakingSub!: Subscription;
@@ -81,11 +83,7 @@ export class AppComponent implements OnInit, AfterViewChecked, OnDestroy {
 
     // Greeting
     const greeting = 'Xin chào! Tôi là trợ lý hoá đơn của bạn. Nhấn nút mic và nói để bắt đầu.';
-    this.pushAssistantMessage(
-      greeting + '\nHello! I\'m your invoice assistant. Press the mic and speak to begin.',
-      [], []
-    );
-    this.speak(greeting, 'vi');
+    this.pushAssistantMessage(greeting, [], []);
   }
 
   ngOnDestroy(): void {
@@ -105,6 +103,8 @@ export class AppComponent implements OnInit, AfterViewChecked, OnDestroy {
   handleAiResponse(response: any): void {
     if (response.transcript) {
       this.lastTranscript = response.transcript;
+      this.liveInterimText = '';
+      this.liveInterimFinal = false;
       this.chatMessages.push({ role: 'user', text: response.transcript, timestamp: new Date() });
     }
 
@@ -128,16 +128,19 @@ export class AppComponent implements OnInit, AfterViewChecked, OnDestroy {
     this.assistantState = this.missingFields.length > 0 ? 'Needs Info' : 'Ready';
     this.shouldScrollChat = true;
 
-    // Request planning guidance (fires in parallel with TTS)
+    // Request planning guidance (fires in parallel with TTS) — only update actions, don't speak
     this.apiService.planAssistant(this.masterContext, '', this.lastTranscript).subscribe({
       next: (plan) => {
         this.recommendedActions = plan?.recommendedActions ?? [];
-        if (plan?.assistantResponse && plan.assistantResponse !== assistantText) {
-          this.pushAssistantMessage(plan.assistantResponse, {}, plan.missingFields ?? []);
-        }
       },
       error: () => {}
     });
+  }
+
+  handleInterimTranscript(event: { text: string; isFinal: boolean }): void {
+    this.liveInterimText = event.text;
+    this.liveInterimFinal = event.isFinal;
+    this.shouldScrollChat = true;
   }
 
   handleStateChange(state: AssistantState): void {
@@ -161,7 +164,7 @@ export class AppComponent implements OnInit, AfterViewChecked, OnDestroy {
         this.assistantState = 'Idle';
         this.chatMessages = [];
         this.pushAssistantMessage(
-          'Hoá đơn đã gửi! Bạn có muốn tạo hoá đơn mới không?\nInvoice submitted! Would you like to create another?',
+          'Hoá đơn đã gửi thành công! Bạn có muốn tạo hoá đơn mới không?',
           [], []
         );
         this.shouldScrollChat = true;

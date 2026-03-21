@@ -171,6 +171,12 @@
   }
 }
 
+.interim-bubble.confirmed {
+  border-style: solid;
+  border-color: rgba(126, 255, 160, 0.4);
+  color: #b8ffd0;
+}
+
 @keyframes interim-fade-in {
   from { opacity: 0; transform: translateY(4px); }
   to   { opacity: 1; transform: translateY(0); }
@@ -179,4 +185,23 @@
 @keyframes cursor-blink {
   0%, 100% { opacity: 1; }
   50%       { opacity: 0; }
+}
+
+// Amplitude-driven mic button scale when user is speaking
+.state-ring.capturing .session-btn {
+  transform: scale(calc(1 + var(--amplitude, 0) * 0.4));
+  transition: transform 0.04s linear;
+}
+
+// Amplitude-driven outer ring glow
+.state-ring.capturing .wave-ring {
+  animation: none;
+  transform: scale(calc(1 + var(--amplitude, 0) * 1.2));
+  opacity: calc(0.9 - var(--amplitude, 0) * 0.4);
+  transition: transform 0.04s linear, opacity 0.04s linear;
+}
+
+.state-ring.capturing .wave-ring.delay {
+  transform: scale(calc(1 + var(--amplitude, 0) * 0.7));
+  opacity: calc(0.6 - var(--amplitude, 0) * 0.3);
 }

@@ -13,53 +13,53 @@ const REQUIRED_HEADER_FIELDS = [
 
 const FIELD_CONFIG = {
   buyerName: {
-    label: 'tên người mua / buyer name',
+    label: 'tên người mua',
     targetTab: 'Buyer',
     targetSection: 'Buyer details',
-    expectedValuePattern: 'Full legal customer/company name',
-    userCommand: 'Hãy nói tên công ty hoặc tên người mua. / Say the buyer or company name.'
+    expectedValuePattern: 'Tên công ty hoặc tên người mua đầy đủ',
+    userCommand: 'Hãy nói tên công ty hoặc tên người mua.'
   },
   taxId: {
-    label: 'mã số thuế / tax ID',
+    label: 'mã số thuế',
     targetTab: 'Buyer',
     targetSection: 'Buyer details',
-    expectedValuePattern: 'Tax identifier string (digits)',
-    userCommand: 'Đọc rõ từng chữ số mã số thuế. / Read each digit of the tax ID clearly.'
+    expectedValuePattern: 'Chuỗi số mã số thuế',
+    userCommand: 'Đọc rõ từng chữ số mã số thuế.'
   },
   vatNumber: {
-    label: 'số VAT / VAT number',
+    label: 'số VAT',
     targetTab: 'Buyer',
     targetSection: 'Buyer details',
-    expectedValuePattern: 'VAT registration number',
-    userCommand: 'Đọc số VAT, hoặc nói "bỏ qua" nếu không có. / Say VAT number, or "skip" if none.'
+    expectedValuePattern: 'Số đăng ký VAT',
+    userCommand: 'Đọc số VAT, hoặc nói "bỏ qua" nếu không có.'
   },
   buyerAddress: {
-    label: 'địa chỉ / buyer address',
+    label: 'địa chỉ',
     targetTab: 'Buyer',
     targetSection: 'Address',
-    expectedValuePattern: 'Street, district, city',
-    userCommand: 'Nói địa chỉ đầy đủ: số nhà, đường, quận, thành phố. / Say full address: street, district, city.'
+    expectedValuePattern: 'Số nhà, đường, quận, thành phố',
+    userCommand: 'Nói địa chỉ đầy đủ: số nhà, đường, quận, thành phố.'
   },
   invoiceType: {
-    label: 'loại hóa đơn / invoice type',
+    label: 'loại hóa đơn',
     targetTab: 'Invoice',
     targetSection: 'Invoice settings',
-    expectedValuePattern: 'digital or printed',
-    userCommand: 'Nói "điện tử" hoặc "giấy". / Say "digital" or "printed".'
+    expectedValuePattern: 'điện tử hoặc giấy',
+    userCommand: 'Nói "điện tử" hoặc "giấy".'
   },
   issueDate: {
-    label: 'ngày phát hành / issue date',
+    label: 'ngày phát hành',
     targetTab: 'Invoice',
     targetSection: 'Invoice settings',
-    expectedValuePattern: 'YYYY-MM-DD or spoken date',
-    userCommand: 'Nói ngày tháng năm phát hành. / Say the issue date, e.g. March 15 2026.'
+    expectedValuePattern: 'YYYY-MM-DD hoặc ngày nói',
+    userCommand: 'Nói ngày tháng năm phát hành. Ví dụ: ngày 15 tháng 3 năm 2026.'
   },
   lineItems: {
-    label: 'hàng hóa / line items',
+    label: 'hàng hóa',
     targetTab: 'Items',
     targetSection: 'Item table',
-    expectedValuePattern: 'description, quantity, unit price, VAT rate',
-    userCommand: 'Mô tả hàng hóa: tên, số lượng, đơn giá, thuế VAT. / Describe items: name, quantity, unit price, VAT rate.'
+    expectedValuePattern: 'mô tả, số lượng, đơn giá, thuế VAT',
+    userCommand: 'Mô tả hàng hóa: tên, số lượng, đơn giá, thuế VAT.'
   }
 };
 
@@ -177,7 +177,8 @@ const computeMissingFields = (invoiceContext = {}) => {
 
 const inferIntentHeuristic = ({ transcript, missingFields }) => {
   const lowered = normalizeString(transcript).toLowerCase();
-  const asksSubmit = /\b(submit|send|finalize|finish|done|complete)\b/.test(lowered);
+  const asksSubmit = /\b(submit|send|finalize|finish|done|complete)\b/.test(lowered) ||
+    /gửi hóa đơn|gửi hoá đơn|xác nhận|hoàn tất|xong rồi|gửi đi/.test(lowered);
   const asksNavigate = /\b(open|switch|go|move|navigate)\b.*\b(tab|section|field|buyer|invoice|items)\b/.test(lowered);
 
   if (asksSubmit) {
@@ -201,15 +202,15 @@ const sanitizeAction = (action = {}, fallbackField) => {
 
   return {
     type,
-    label: normalizeString(action.label) || `Fill ${fieldConfig.label}`,
+    label: normalizeString(action.label) || `Điền ${fieldConfig.label}`,
     targetTab: normalizeString(action.targetTab) || fieldConfig.targetTab,
     targetSection: normalizeString(action.targetSection) || fieldConfig.targetSection,
     targetField: field,
     expectedValuePattern: normalizeString(action.expectedValuePattern) || fieldConfig.expectedValuePattern,
     userCommand:
       normalizeString(action.userCommand) ||
-      `Please enter ${fieldConfig.label} and confirm the exact value back to me.`,
-    reason: normalizeString(action.reason) || `${fieldConfig.label} is required before submit.`
+      `Vui lòng nhập ${fieldConfig.label} và xác nhận giá trị chính xác.`,
+    reason: normalizeString(action.reason) || `${fieldConfig.label} là bắt buộc trước khi gửi.`
   };
 };
 
@@ -225,14 +226,14 @@ const buildFallbackPlan = ({ websiteContext, transcript, missingFields }) => {
       targetSection: websiteContext.currentSection || 'Summary',
       targetField: '',
       expectedValuePattern: 'All required invoice fields complete',
-      userCommand: 'Click Submit invoice now and confirm success message.',
-      reason: 'All required fields are present and user asked to submit.'
+      userCommand: 'Nhấn gửi hóa đơn và xác nhận thông báo thành công.',
+      reason: 'Tất cả trường bắt buộc đã đầy đủ và người dùng yêu cầu gửi.'
     };
 
     return {
       intent: 'submit',
       recommendedActions: [submitAction],
-      assistantResponse: 'All required data is complete. Please submit the invoice now.',
+      assistantResponse: 'Đã có đủ thông tin. Vui lòng gửi hóa đơn ngay bây giờ.',
       dynamicCommands: [submitAction.userCommand]
     };
   }
@@ -246,16 +247,16 @@ const buildFallbackPlan = ({ websiteContext, transcript, missingFields }) => {
       targetTab: fieldConfig.targetTab,
       targetSection: fieldConfig.targetSection,
       expectedValuePattern: fieldConfig.expectedValuePattern,
-      userCommand: `Open ${fieldConfig.targetTab} tab and fill ${fieldConfig.label}.`,
-      reason: `${fieldConfig.label} is currently missing.`
+      userCommand: `Mở tab ${fieldConfig.targetTab} và điền ${fieldConfig.label}.`,
+      reason: `${fieldConfig.label} hiện đang thiếu.`
     },
     targetField
   );
 
   const assistantResponse =
     fallbackIntent === 'navigate_tab'
-      ? `Open ${action.targetTab} tab and tell me when ${action.targetField} is visible.`
-      : `Please provide ${fieldConfig.label} so I can continue.`;
+      ? `Mở tab ${action.targetTab} và cho tôi biết khi ${action.targetField} hiển thị.`
+      : `Vui lòng cung cấp ${fieldConfig.label} để tôi tiếp tục.`;
 
   return {
     intent: fallbackIntent,
@@ -296,6 +297,7 @@ const buildPlannerPrompt = ({ invoiceContext, websiteContext, transcript, voiceS
   return [
     'You are an invoice speech-to-action orchestration planner for vinvoice.com.',
     'The user may speak Vietnamese or English. Understand both languages in the transcript.',
+    'IMPORTANT: All assistantResponse and userCommand values MUST be in Vietnamese only. Never use English in responses.',
     'Return JSON only. No markdown. No selectors. No CSS/XPath.',
     'Your plan must be deterministic, concise, and field-level actionable.',
     'Allowed intent values: collect_more, fill_field, navigate_tab, confirm, submit.',

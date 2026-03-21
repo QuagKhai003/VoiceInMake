@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { WebSpeechService, SpeechState } from '../../services/web-speech.service';
 import { ApiService } from '../../services/api.service';
+import { AudioAnalyserService } from '../../services/audio-analyser.service';
 import { Subscription } from 'rxjs';
 
 @Component({
@@ -16,10 +17,13 @@ export class VoiceInterfaceComponent implements OnInit, OnDestroy {
   @Input() currentContext: any = {};
   @Output() aiResponse = new EventEmitter<any>();
   @Output() stateChange = new EventEmitter<'Idle' | 'Listening' | 'Processing' | 'Error'>();
+  @Output() interimTranscript = new EventEmitter<{ text: string; isFinal: boolean }>();
 
   conversationActive = false;
   speechState: SpeechState = 'inactive';
   interimText = '';             // live partial transcript shown while user speaks
+  isFinalTranscript = false;
+  amplitude = 0;
   error: string | null = null;
   selectedLanguage: 'vi' | 'en' | 'auto' = 'vi';
 
@@ -27,7 +31,8 @@ export class VoiceInterfaceComponent implements OnInit, OnDestroy {
 
   constructor(
     public webSpeech: WebSpeechService,
-    private apiService: ApiService
+    private apiService: ApiService,
+    private audioAnalyser: AudioAnalyserService
   ) {}
 
   ngOnInit(): void {
@@ -47,11 +52,14 @@ export class VoiceInterfaceComponent implements OnInit, OnDestroy {
       }),
 
       this.webSpeech.transcript$.subscribe(({ text, isFinal }) => {
-        this.interimText = isFinal ? '' : text;
+        this.interimText = text;
+        this.isFinalTranscript = isFinal;
+        this.interimTranscript.emit({ text, isFinal });
       }),
 
       this.webSpeech.finalTranscript$.subscribe((transcript) => {
         this.interimText = '';
+        this.isFinalTranscript = false;
         this.sendTranscript(transcript);
       }),
 
@@ -59,7 +67,9 @@ export class VoiceInterfaceComponent implements OnInit, OnDestroy {
         this.error = err;
         this.conversationActive = false;
         this.stateChange.emit('Error');
-      })
+      }),
+
+      this.audioAnalyser.amplitude$.subscribe(v => (this.amplitude = v))
     );
   }
 
@@ -68,32 +78,35 @@ export class VoiceInterfaceComponent implements OnInit, OnDestroy {
     if (this.conversationActive) {
       this.webSpeech.stop();
     }
+    this.audioAnalyser.stop();
   }
 
   toggleConversation(): void {
     if (this.conversationActive) {
       this.webSpeech.stop();
+      this.audioAnalyser.stop();
       this.conversationActive = false;
       this.interimText = '';
     } else {
       if (!this.webSpeech.isSupported) {
-        this.error = 'Speech recognition requires Chrome. Please open in Chrome.';
+        this.error = 'Nhận dạng giọng nói yêu cầu trình duyệt Chrome. Vui lòng mở bằng Chrome.';
         return;
       }
       this.error = null;
       this.conversationActive = true;
+      this.audioAnalyser.start();
       this.webSpeech.start(this.selectedLanguage);
     }
   }
 
   get statusLabel(): string {
-    if (!this.conversationActive) return 'Nhấn 🎙 để bắt đầu / Click 🎙 to start';
+    if (!this.conversationActive) return 'Nhấn 🎙 để bắt đầu';
     switch (this.speechState) {
-      case 'listening':   return '👂 Đang lắng nghe... / Listening...';
-      case 'capturing':   return '🎙 Đang ghi âm... / Recording...';
-      case 'processing':  return '🤖 Đang phân tích... / Analysing...';
-      case 'speaking':    return '🔊 Trợ lý đang nói... / Assistant speaking...';
-      default:            return 'Sẵn sàng / Ready';
+      case 'listening':   return '👂 Đang lắng nghe...';
+      case 'capturing':   return '🎙 Đang ghi âm...';
+      case 'processing':  return '🤖 Đang phân tích...';
+      case 'speaking':    return '🔊 Trợ lý đang nói...';
+      default:            return 'Sẵn sàng';
     }
   }
 
