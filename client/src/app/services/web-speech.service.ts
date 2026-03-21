@@ -174,6 +174,7 @@ export class WebSpeechService {
     };
 
     r.onend = () => {
+      this.recognition = null;
       if (!this.active) return;
 
       const text = this.pendingFinal.trim();
@@ -201,6 +202,7 @@ export class WebSpeechService {
     };
 
     r.onerror = (event: any) => {
+      this.recognition = null;
       if (event.error === 'no-speech' || event.error === 'audio-capture') {
         // Silent restart
         return;

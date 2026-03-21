@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { WebSpeechService, SpeechState } from '../../services/web-speech.service';
 import { ApiService } from '../../services/api.service';
+import { AudioAnalyserService } from '../../services/audio-analyser.service';
 import { Subscription } from 'rxjs';
 
 @Component({
@@ -20,6 +21,8 @@ export class VoiceInterfaceComponent implements OnInit, OnDestroy {
   conversationActive = false;
   speechState: SpeechState = 'inactive';
   interimText = '';             // live partial transcript shown while user speaks
+  isFinalTranscript = false;
+  amplitude = 0;
   error: string | null = null;
   selectedLanguage: 'vi' | 'en' | 'auto' = 'vi';
 
@@ -27,7 +30,8 @@ export class VoiceInterfaceComponent implements OnInit, OnDestroy {
 
   constructor(
     public webSpeech: WebSpeechService,
-    private apiService: ApiService
+    private apiService: ApiService,
+    private audioAnalyser: AudioAnalyserService
   ) {}
 
   ngOnInit(): void {
@@ -47,11 +51,13 @@ export class VoiceInterfaceComponent implements OnInit, OnDestroy {
       }),
 
       this.webSpeech.transcript$.subscribe(({ text, isFinal }) => {
-        this.interimText = isFinal ? '' : text;
+        this.interimText = text;
+        this.isFinalTranscript = isFinal;
       }),
 
       this.webSpeech.finalTranscript$.subscribe((transcript) => {
         this.interimText = '';
+        this.isFinalTranscript = false;
         this.sendTranscript(transcript);
       }),
 
@@ -59,7 +65,9 @@ export class VoiceInterfaceComponent implements OnInit, OnDestroy {
         this.error = err;
         this.conversationActive = false;
         this.stateChange.emit('Error');
-      })
+      }),
+
+      this.audioAnalyser.amplitude$.subscribe(v => (this.amplitude = v))
     );
   }
 
@@ -68,11 +76,13 @@ export class VoiceInterfaceComponent implements OnInit, OnDestroy {
     if (this.conversationActive) {
       this.webSpeech.stop();
     }
+    this.audioAnalyser.stop();
   }
 
   toggleConversation(): void {
     if (this.conversationActive) {
       this.webSpeech.stop();
+      this.audioAnalyser.stop();
       this.conversationActive = false;
       this.interimText = '';
     } else {
@@ -82,6 +92,7 @@ export class VoiceInterfaceComponent implements OnInit, OnDestroy {
       }
       this.error = null;
       this.conversationActive = true;
+      this.audioAnalyser.start();
       this.webSpeech.start(this.selectedLanguage);
     }
   }
