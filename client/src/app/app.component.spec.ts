@@ -15,7 +15,13 @@ describe('AppComponent', () => {
     apiService.healthCheck.and.returnValue(of({ timestamp: '2026-03-21T00:00:00.000Z' }));
     apiService.createInvoice.and.returnValue(of({}));
     apiService.planAssistant.and.returnValue(of({ recommendedActions: [], assistantResponse: 'Plan ready' }));
-    component = new AppComponent(apiService);
+    const ttsService = jasmine.createSpyObj('TtsService', ['speak', 'stop'], { speaking$: { subscribe: () => ({ unsubscribe: () => {} }) } });
+    ttsService.speak.and.returnValue(Promise.resolve());
+    const webSpeech = jasmine.createSpyObj('WebSpeechService', ['aiStartedSpeaking', 'aiFinishedSpeaking', 'processingDone'], {
+      inactivity$: { subscribe: () => {} },
+      bargeIn$: { subscribe: () => {} }
+    });
+    component = new AppComponent(apiService, ttsService as any, webSpeech as any);
   });
 
   it('sets backend status from health check on init', () => {
@@ -35,7 +41,6 @@ describe('AppComponent', () => {
     expect(component.masterContext).toEqual({ buyerName: 'Alice', totalAmount: 42 });
     expect(component.missingFields).toEqual(['issueDate']);
     expect(component.assistantState).toBe('Needs Info');
-    expect(component.assistantMessage).toBe('Plan ready');
     expect(apiService.planAssistant).toHaveBeenCalled();
   });
 
@@ -50,6 +55,5 @@ describe('AppComponent', () => {
 
     expect(apiService.createInvoice).toHaveBeenCalledWith({ buyerName: 'Alice', totalAmount: 42 });
     expect(component.assistantState).toBe('Idle');
-    expect(component.assistantMessage).toContain('Invoice submitted');
   });
 });

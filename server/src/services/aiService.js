@@ -25,15 +25,17 @@ const extractJson = (rawText) => {
 };
 
 const systemPrompt = `
-You are a structured extraction assistant. Convert every transcript into a JSON object with the following keys:
-- buyerName (string)
-- taxId (string)
-- vatNumber (string)
-- buyerAddress (string)
-- invoiceType (string)
-- issueDate (ISO 8601 date string)
-- lineItems (array of { description, quantity, unitPrice, vatRate, lineTotal })
+You are a structured extraction assistant. The user may speak in Vietnamese or English.
+Convert every transcript into a JSON object with the following keys:
+- buyerName (string) — tên người mua / buyer or company name
+- taxId (string) — mã số thuế / tax identification number
+- vatNumber (string) — số VAT / VAT registration number
+- buyerAddress (string) — địa chỉ / buyer address
+- invoiceType (string) — loại hóa đơn / invoice type (e.g. digital, printed)
+- issueDate (ISO 8601 date string) — ngày phát hành / issue date
+- lineItems (array of { description, quantity, unitPrice, vatRate, lineTotal }) — danh sách hàng hóa / line items
 
+Understand Vietnamese number words: "nghìn"=1000, "triệu"=1000000, "phần trăm"=percent, "chiếc/cái"=unit.
 Only reply with the JSON object. Use null or empty arrays for missing values.
 `.trim();
 
@@ -122,24 +124,64 @@ const determineMissingFields = (entities = {}) => {
   return missing;
 };
 
-const generateAssistantResponse = (missingFields = [], intent = 'collect_more') => {
+const generateAssistantResponse = (missingFields = [], intent = 'collect_more', capturedFields = []) => {
   if (intent === 'submit') {
-    return 'Invoice data looks complete. Submitting now.';
+    return 'Hoàn tất! Đang tạo hóa đơn. / All done! Submitting your invoice now.';
   }
   if (!missingFields.length) {
-    return 'All required invoice details are captured. Confirm if you want to submit now.';
+    return (
+      'Tuyệt vời! Tôi đã có đủ thông tin. Bạn có muốn tạo hóa đơn ngay bây giờ không? Hãy nói "gửi hóa đơn" để xác nhận.\n' +
+      'Great! All required details are captured. Say "submit invoice" to confirm, or review the fields on the right.'
+    );
   }
+
+  const remaining = missingFields.length;
   const target = missingFields[0];
-  const prompts = {
-    buyerName: 'Who is the buyer or company? Provide the full name.',
-    taxId: 'Please speak or type the buyer tax identification number.',
-    vatNumber: 'Do you have the VAT number? Share it so I can fill it.',
-    buyerAddress: 'Where should the invoice be addressed? Give me the buyer address.',
-    invoiceType: 'Is this a digital or printed invoice? Say the type.',
-    issueDate: 'What is the invoice issue date? Provide it in YYYY-MM-DD format.',
-    lineItems: 'List at least one item with quantity, unit price, and VAT rate so I can capture line items.'
+
+  // Acknowledgement phrases when something was just captured
+  const acks = [
+    'Tốt lắm! / Got it!',
+    'Được rồi! / Noted!',
+    'Cảm ơn! / Thanks!',
+    'OK!'
+  ];
+  const ack = capturedFields.length
+    ? acks[capturedFields.length % acks.length] + ' '
+    : '';
+
+  const questions = {
+    buyerName: (
+      `${ack}Hóa đơn này dành cho ai? Hãy nói tên công ty hoặc tên người mua.\n` +
+      `(${ack}Who is this invoice for? Say the buyer or company name.)`
+    ),
+    taxId: (
+      `${ack}Mã số thuế của người mua là gì? Đọc từng chữ số rõ ràng.\n` +
+      `(${ack}What's the buyer's tax ID? Read each digit clearly.)`
+    ),
+    vatNumber: (
+      `${ack}Bạn có số VAT không? Nếu không có hãy nói "bỏ qua".\n` +
+      `(${ack}Do you have a VAT number? Say "skip" if none.)`
+    ),
+    buyerAddress: (
+      `${ack}Địa chỉ của người mua là gì? Nói số nhà, đường, quận, thành phố.\n` +
+      `(${ack}What's the buyer's address? Include street, district, city.)`
+    ),
+    invoiceType: (
+      `${ack}Đây là hóa đơn điện tử hay giấy? Nói "điện tử" hoặc "giấy".\n` +
+      `(${ack}Digital or printed invoice? Say "digital" or "printed".)`
+    ),
+    issueDate: (
+      `${ack}Ngày phát hành hóa đơn là ngày nào?\n` +
+      `(${ack}What is the invoice issue date? E.g. "March 15, 2026".)`
+    ),
+    lineItems: (
+      `${ack}Hàng hóa hoặc dịch vụ là gì? Ví dụ: "Tư vấn, 1 cái, 5 triệu, VAT 10%".\n` +
+      `(${ack}What are the items? E.g. "Consulting, qty 1, 5 million, VAT 10%".)`
+    )
   };
-  return prompts[target] || `Please provide ${target}.`;
+
+  const suffix = remaining > 1 ? ` (còn ${remaining - 1} trường nữa / ${remaining - 1} more fields)` : '';
+  return (questions[target] || `${ack}Vui lòng cung cấp: ${target}. / Please provide: ${target}.`) + suffix;
 };
 
 const shouldSubmitNow = (transcript = '') => {
@@ -160,13 +202,16 @@ const buildConfidence = (missingFields = []) => {
   return Number((1 - ratio).toFixed(2));
 };
 
-exports.transcribeAudio = async (buffer, filename = 'audio.webm') => {
+exports.transcribeAudio = async (buffer, filename = 'audio.webm', mimeType = 'audio/webm', language = 'vi') => {
   const client = getClient();
-  const file = await toFile(buffer, filename);
-  const transcription = await client.audio.transcriptions.create({
-    file,
-    model: 'whisper-1'
-  });
+  const file = await toFile(buffer, filename, { type: mimeType });
+  const transcriptionOptions = { file, model: 'whisper-1' };
+  // Pass language hint to Whisper for faster, more accurate transcription
+  // 'auto' means let Whisper detect; otherwise pass ISO 639-1 code (vi, en, etc.)
+  if (language && language !== 'auto') {
+    transcriptionOptions.language = language;
+  }
+  const transcription = await client.audio.transcriptions.create(transcriptionOptions);
 
   if (!transcription?.text) {
     throw new Error('Whisper did not return any transcription text');
@@ -195,7 +240,12 @@ exports.extractInvoiceEntities = async (transcript, context = {}) => {
   const mergedEntities = mergeContexts(context, extracted);
   const missingFields = determineMissingFields(mergedEntities);
   const intent = buildIntent(missingFields, transcript);
-  const assistantResponse = generateAssistantResponse(missingFields, intent);
+
+  // Fields that were just newly captured in this turn (not already in context)
+  const newlyCaptured = HEADER_FIELDS.filter(
+    (f) => mergedEntities[f] && !String(context[f] ?? '').trim()
+  );
+  const assistantResponse = generateAssistantResponse(missingFields, intent, newlyCaptured);
   const confidence = buildConfidence(missingFields);
   const normalizedContext = {
     ...mergedEntities,

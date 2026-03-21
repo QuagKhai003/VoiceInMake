@@ -19,12 +19,21 @@ export class ApiService {
     return this.http.post(`${this.baseUrl}/invoice`, data);
   }
 
-  processVoice(audioBlob: Blob, currentContext: any = {}): Observable<any> {
+  processVoice(audioBlob: Blob, currentContext: any = {}, language: string = 'vi'): Observable<any> {
     const formData = new FormData();
     formData.append('audio', audioBlob, 'voice.webm');
     formData.append('context', JSON.stringify(currentContext));
+    formData.append('language', language);
 
     return this.http.post(`${this.baseUrl}/voice`, formData);
+  }
+
+  processText(transcript: string, currentContext: any = {}, language: string = 'vi'): Observable<any> {
+    return this.http.post(`${this.baseUrl}/voice/text`, {
+      transcript,
+      context: currentContext,
+      language
+    });
   }
 
   planAssistant(invoiceContext: any, websiteContext: string, transcript?: string): Observable<any> {

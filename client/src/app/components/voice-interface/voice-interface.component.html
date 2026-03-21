@@ -1,28 +1,46 @@
-<div class="voice-interface">
-  <div class="status-indicator" [ngClass]="{
-      'listening': isRecording,
-      'processing': isProcessing,
-      'error': !!error
-    }">
-    <span class="pulse-ring" *ngIf="isRecording"></span>
-    <span class="pulse-ring processing-ring" *ngIf="isProcessing"></span>
-    
-    <button 
-      class="mic-button"
-      [class.active]="isRecording"
-      [disabled]="isProcessing"
-      (mousedown)="startRecording()"
-      (mouseup)="stopRecording()"
-      (mouseleave)="stopRecording()"
-      (touchstart)="startRecording()"
-      (touchend)="stopRecording()"
-      (click)="$event.preventDefault()">
-      🎙️
-    </button>
-  </div>
-  
-  <p class="status-message">{{ statusMessage }}</p>
-  <p class="error-message" *ngIf="error">{{ error }}</p>
+<div class="conversation-interface">
 
-  <p class="hint">Press and hold to speak</p>
+  <!-- Language selector -->
+  <div class="language-row">
+    <span class="lang-label">Ngôn ngữ / Language:</span>
+    <div class="lang-options">
+      <button class="lang-btn" [class.selected]="selectedLanguage === 'vi'" (click)="selectedLanguage = 'vi'">🇻🇳 Tiếng Việt</button>
+      <button class="lang-btn" [class.selected]="selectedLanguage === 'en'" (click)="selectedLanguage = 'en'">🇺🇸 English</button>
+      <button class="lang-btn" [class.selected]="selectedLanguage === 'auto'" (click)="selectedLanguage = 'auto'">🌐 Auto</button>
+    </div>
+  </div>
+
+  <!-- Status ring + toggle button -->
+  <div class="mic-area">
+    <div class="state-ring" [ngClass]="sessionStateClass">
+      <div class="wave-ring" *ngIf="speechState === 'capturing'"></div>
+      <div class="wave-ring delay" *ngIf="speechState === 'capturing'"></div>
+      <button
+        class="session-btn"
+        [class.active]="conversationActive"
+        [class.processing]="speechState === 'processing'"
+        (click)="toggleConversation()">
+        <span class="btn-icon">{{ conversationActive ? '⏹' : '🎙' }}</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Status label -->
+  <p class="status-label" [class.error]="!!error">
+    {{ error || statusLabel }}
+  </p>
+
+  <!-- Live interim transcript bubble -->
+  <div class="interim-bubble" *ngIf="interimText">
+    <span class="interim-cursor"></span>{{ interimText }}
+  </div>
+
+  <!-- Hint -->
+  <p class="hint" *ngIf="!conversationActive && !error">
+    Nhấn 🎙, nói tự do, dừng lại để gửi — / Press 🎙, speak freely, pause to send
+  </p>
+  <p class="hint active-hint" *ngIf="conversationActive && speechState === 'listening'">
+    Đang lắng nghe — hãy nói bất cứ điều gì / Listening — say anything
+  </p>
+
 </div>

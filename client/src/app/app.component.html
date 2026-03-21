@@ -1,76 +1,137 @@
-<header class="app-header">
-  <div>
-    <h1>VoiceInMake</h1>
-    <p class="subtitle">Assistant-guided invoice coordination for vinvoice.com</p>
-  </div>
-  <div class="status-pill">
-    Backend: <strong>{{ backendStatus }}</strong>
-  </div>
-</header>
+<div class="app-shell">
 
-<main class="app-main">
-  <router-outlet></router-outlet>
-
-  <div class="success-banner" *ngIf="submissionMessage">
-    {{ submissionMessage }}
-  </div>
-
-  <section class="assistant-panel">
-    <div class="state-row">
-      <div class="state-chip" [ngClass]="assistantStateClass">
-        {{ assistantState }}
-      </div>
-      <div class="state-message">
-        {{ assistantMessage }}
-      </div>
+  <!-- ── Header ─────────────────────────────────────────────── -->
+  <header class="app-header">
+    <div class="header-left">
+      <h1>VoiceInMake</h1>
+      <span class="subtitle">Trợ lý hóa đơn · Invoice Assistant</span>
     </div>
+    <div class="header-right">
+      <span class="backend-dot" [class.ok]="backendStatus === 'Backend OK'"></span>
+      <span class="backend-label">{{ backendStatus }}</span>
+      <button class="icon-btn" [class.active]="ttsEnabled" (click)="ttsEnabled = !ttsEnabled" title="Toggle voice output">
+        {{ ttsEnabled ? '🔊' : '🔇' }}
+      </button>
+      <button class="context-toggle" (click)="showContextPanel = !showContextPanel" *ngIf="hasContext">
+        📋 {{ filledFields.length }} trường / fields
+      </button>
+    </div>
+  </header>
 
-    <app-voice-interface 
+  <!-- ── Main layout ────────────────────────────────────────── -->
+  <div class="app-body">
+
+    <!-- ── Chat area ──────────────────────────────────────────── -->
+    <main class="chat-area" #chatScroll>
+
+      <div class="success-flash" *ngIf="submissionMessage">{{ submissionMessage }}</div>
+
+      <!-- Chat messages -->
+      <div class="message-list">
+        <div
+          *ngFor="let msg of chatMessages"
+          class="message"
+          [ngClass]="msg.role">
+
+          <!-- User message -->
+          <div class="bubble" *ngIf="msg.role === 'user'">
+            <span class="bubble-icon">👤</span>
+            <div class="bubble-body">
+              <p class="bubble-text">{{ msg.text }}</p>
+              <span class="bubble-time">{{ msg.timestamp | date:'HH:mm:ss' }}</span>
+            </div>
+          </div>
+
+          <!-- Assistant message -->
+          <div class="bubble" *ngIf="msg.role === 'assistant'">
+            <span class="bubble-icon">🤖</span>
+            <div class="bubble-body">
+              <p class="bubble-text">{{ msg.text }}</p>
+
+              <!-- Extracted fields inline -->
+              <div class="extracted-pills" *ngIf="extractedEntries(msg.extractedFields).length">
+                <span class="pill captured" *ngFor="let f of extractedEntries(msg.extractedFields)">
+                  ✓ {{ f.key }}
+                </span>
+              </div>
+
+              <!-- Missing fields -->
+              <div class="missing-row" *ngIf="msg.missingFields && msg.missingFields.length">
+                <span class="pill missing" *ngFor="let f of msg.missingFields">
+                  ⚠ {{ fieldLabel(f) }}
+                </span>
+              </div>
+
+              <span class="bubble-time">{{ msg.timestamp | date:'HH:mm:ss' }}</span>
+            </div>
+          </div>
+
+          <!-- System message -->
+          <div class="system-message" *ngIf="msg.role === 'system'">
+            {{ msg.text }}
+          </div>
+
+        </div>
+
+        <!-- Typing indicator while processing -->
+        <div class="message assistant" *ngIf="assistantState === 'Processing'">
+          <div class="bubble">
+            <span class="bubble-icon">🤖</span>
+            <div class="bubble-body typing">
+              <span></span><span></span><span></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Speaking indicator while TTS plays -->
+        <div class="message assistant" *ngIf="isSpeaking">
+          <div class="bubble">
+            <span class="bubble-icon">🔊</span>
+            <div class="bubble-body">
+              <p class="bubble-text speaking-text">Đang nói... / Speaking...</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- ── Context side panel (slide in when fields captured) ─── -->
+    <aside class="context-panel" [class.visible]="showContextPanel && hasContext">
+      <h3>Dữ liệu hóa đơn / Invoice Data</h3>
+      <ul class="field-list">
+        <li *ngFor="let f of filledFields" class="field-item">
+          <span class="field-label">{{ f.label }}</span>
+          <span class="field-value">{{ f.value | json }}</span>
+        </li>
+      </ul>
+      <div class="missing-section" *ngIf="missingFields.length">
+        <h4>Còn thiếu / Missing</h4>
+        <ul>
+          <li *ngFor="let f of missingFields" class="missing-item">{{ fieldLabel(f) }}</li>
+        </ul>
+      </div>
+      <button class="btn-submit" (click)="submitInvoice()" [disabled]="missingFields.length > 0">
+        {{ missingFields.length ? 'Còn thiếu thông tin' : '✅ Tạo hóa đơn / Submit' }}
+      </button>
+    </aside>
+
+  </div>
+
+  <!-- ── Voice control strip (bottom) ──────────────────────── -->
+  <footer class="voice-strip">
+    <div class="state-badge" [ngClass]="assistantStateClass">{{ assistantState }}</div>
+
+    <app-voice-interface
       [currentContext]="masterContext"
       (aiResponse)="handleAiResponse($event)"
       (stateChange)="handleStateChange($event)">
     </app-voice-interface>
 
-    <div class="website-context">
-      <label for="website-context">Share current website view</label>
-      <textarea 
-        id="website-context"
-        [(ngModel)]="websiteContext"
-        placeholder="e.g., Digital Invoice tab open, fields visible, awaiting price input">
-      </textarea>
-      <button class="btn-plan" (click)="requestPlanning()">
-        {{ planLoading ? 'Planning…' : 'Request Suggested Action' }}
-      </button>
-      <p class="helper-text">Recommended actions will reflect the latest context and transcript.</p>
+    <!-- Recommended next action -->
+    <div class="next-action" *ngIf="recommendedActions.length && assistantState !== 'Processing'">
+      <span class="next-label">Gợi ý:</span>
+      <span class="next-text">{{ recommendedActions[0]?.userCommand }}</span>
     </div>
-  </section>
+  </footer>
 
-  <section class="insights-panel">
-    <div class="insight-card" *ngIf="missingFields.length">
-      <h3>Missing Fields</h3>
-      <ul>
-        <li *ngFor="let field of missingFields">
-          {{ field }}
-        </li>
-      </ul>
-    </div>
-
-    <div class="insight-card">
-      <h3>Recommended Actions</h3>
-      <p class="helper-text" *ngIf="planLoading">Gathering guidance from the assistant…</p>
-      <p class="helper-text" *ngIf="!planLoading && !recommendedActions.length">Run a plan request to see what the assistant suggests.</p>
-      <p class="helper-text" *ngIf="planError">{{ planError }}</p>
-      <ul *ngIf="recommendedActions.length">
-        <li *ngFor="let action of recommendedActions">
-          {{ action }}
-        </li>
-      </ul>
-    </div>
-
-    <app-invoice-context-log 
-      [context]="masterContext"
-      (contextChange)="handleContextChange($event)"
-      (submitInvoice)="submitInvoice()">
-    </app-invoice-context-log>
-  </section>
-</main>
+</div>

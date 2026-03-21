@@ -13,46 +13,53 @@ const REQUIRED_HEADER_FIELDS = [
 
 const FIELD_CONFIG = {
   buyerName: {
-    label: 'buyer name',
+    label: 'tên người mua / buyer name',
     targetTab: 'Buyer',
     targetSection: 'Buyer details',
-    expectedValuePattern: 'Full legal customer/company name'
+    expectedValuePattern: 'Full legal customer/company name',
+    userCommand: 'Hãy nói tên công ty hoặc tên người mua. / Say the buyer or company name.'
   },
   taxId: {
-    label: 'tax ID',
+    label: 'mã số thuế / tax ID',
     targetTab: 'Buyer',
     targetSection: 'Buyer details',
-    expectedValuePattern: 'Tax identifier string (letters/numbers)'
+    expectedValuePattern: 'Tax identifier string (digits)',
+    userCommand: 'Đọc rõ từng chữ số mã số thuế. / Read each digit of the tax ID clearly.'
   },
   vatNumber: {
-    label: 'VAT number',
+    label: 'số VAT / VAT number',
     targetTab: 'Buyer',
     targetSection: 'Buyer details',
-    expectedValuePattern: 'VAT registration number format for buyer country'
+    expectedValuePattern: 'VAT registration number',
+    userCommand: 'Đọc số VAT, hoặc nói "bỏ qua" nếu không có. / Say VAT number, or "skip" if none.'
   },
   buyerAddress: {
-    label: 'buyer address',
+    label: 'địa chỉ / buyer address',
     targetTab: 'Buyer',
     targetSection: 'Address',
-    expectedValuePattern: 'Street, city, region, postal code, country'
+    expectedValuePattern: 'Street, district, city',
+    userCommand: 'Nói địa chỉ đầy đủ: số nhà, đường, quận, thành phố. / Say full address: street, district, city.'
   },
   invoiceType: {
-    label: 'invoice type',
+    label: 'loại hóa đơn / invoice type',
     targetTab: 'Invoice',
     targetSection: 'Invoice settings',
-    expectedValuePattern: 'One of: digital, printed, or equivalent supported type'
+    expectedValuePattern: 'digital or printed',
+    userCommand: 'Nói "điện tử" hoặc "giấy". / Say "digital" or "printed".'
   },
   issueDate: {
-    label: 'issue date',
+    label: 'ngày phát hành / issue date',
     targetTab: 'Invoice',
     targetSection: 'Invoice settings',
-    expectedValuePattern: 'YYYY-MM-DD'
+    expectedValuePattern: 'YYYY-MM-DD or spoken date',
+    userCommand: 'Nói ngày tháng năm phát hành. / Say the issue date, e.g. March 15 2026.'
   },
   lineItems: {
-    label: 'line items',
+    label: 'hàng hóa / line items',
     targetTab: 'Items',
     targetSection: 'Item table',
-    expectedValuePattern: 'At least one item with description, quantity, unitPrice, vatRate'
+    expectedValuePattern: 'description, quantity, unit price, VAT rate',
+    userCommand: 'Mô tả hàng hóa: tên, số lượng, đơn giá, thuế VAT. / Describe items: name, quantity, unit price, VAT rate.'
   }
 };
 
@@ -288,6 +295,7 @@ const getClient = () => {
 const buildPlannerPrompt = ({ invoiceContext, websiteContext, transcript, voiceSession, missingFields }) => {
   return [
     'You are an invoice speech-to-action orchestration planner for vinvoice.com.',
+    'The user may speak Vietnamese or English. Understand both languages in the transcript.',
     'Return JSON only. No markdown. No selectors. No CSS/XPath.',
     'Your plan must be deterministic, concise, and field-level actionable.',
     'Allowed intent values: collect_more, fill_field, navigate_tab, confirm, submit.',
@@ -382,12 +390,14 @@ const validatePayload = ({ invoiceContext, websiteContext }) => {
     throw error;
   }
 
-  if (typeof websiteContext === 'string') {
-    return;
-  }
-
-  if (!websiteContext || typeof websiteContext !== 'object' || Array.isArray(websiteContext)) {
-    const error = new Error('websiteContext must be an object.');
+  // Accept string, null, undefined (treated as empty string), or plain object
+  if (
+    websiteContext !== null &&
+    websiteContext !== undefined &&
+    typeof websiteContext !== 'string' &&
+    (typeof websiteContext !== 'object' || Array.isArray(websiteContext))
+  ) {
+    const error = new Error('websiteContext must be a string or object.');
     error.status = 400;
     error.code = 'ASSISTANT_PLAN_INVALID_WEBSITE_CONTEXT';
     throw error;
@@ -398,8 +408,8 @@ exports.buildAssistantPlan = async ({ invoiceContext, websiteContext, transcript
   validatePayload({ invoiceContext, websiteContext });
 
   const normalizedInvoiceContext = normalizeInvoiceContext(invoiceContext);
-  const normalizedWebsiteContext = typeof websiteContext === 'string'
-    ? parseWebsiteContextFromString(websiteContext)
+  const normalizedWebsiteContext = (websiteContext === null || websiteContext === undefined || typeof websiteContext === 'string')
+    ? parseWebsiteContextFromString(websiteContext || '')
     : normalizeWebsiteContext(websiteContext);
   const normalizedTranscript = normalizeString(transcript);
   const normalizedVoiceSession = normalizeVoiceSession(voiceSession);

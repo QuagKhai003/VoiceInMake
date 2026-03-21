@@ -70,6 +70,36 @@ const parseContext = (contextPayload) => {
   return contextPayload;
 };
 
+/**
+ * POST /api/voice/text
+ * Accepts a pre-transcribed text (from browser Web Speech API) and skips Whisper.
+ * Body: { transcript: string, context?: object, language?: string }
+ */
+exports.processText = async (req, res) => {
+  const { transcript, context: rawContext, language = 'vi' } = req.body || {};
+
+  if (!transcript || !String(transcript).trim()) {
+    return res.status(400).json({
+      message: 'transcript is required.',
+      code: 'VOICE_TRANSCRIPT_REQUIRED'
+    });
+  }
+
+  const context = parseContext(rawContext);
+
+  try {
+    const payload = await aiService.extractInvoiceEntities(String(transcript).trim(), context);
+    res.status(200).json({ transcript, ...payload, language });
+  } catch (error) {
+    console.error('Text processing failed', error);
+    res.status(502).json({
+      message: 'Failed to process transcript.',
+      code: 'VOICE_PROCESSING_ERROR',
+      error: error.message
+    });
+  }
+};
+
 exports.processVoice = async (req, res) => {
   if (!req.file) {
     return res.status(400).json({
@@ -86,25 +116,32 @@ exports.processVoice = async (req, res) => {
   }
 
   const context = parseContext(req.body.context);
+  const language = req.body.language || 'vi';
 
   try {
-    const transcript = await aiService.transcribeAudio(req.file.buffer, req.file.originalname);
+    const transcript = await aiService.transcribeAudio(req.file.buffer, req.file.originalname, req.file.mimetype || 'audio/webm', language);
     const payload = await aiService.extractInvoiceEntities(transcript, context);
 
     res.status(200).json({
       transcript,
       ...payload,
+      language,
       message: 'Voice payload processed successfully'
     });
   } catch (error) {
     console.error('Voice processing failed', error);
     const isConfigError = /OPENAI_API_KEY/.test(error.message);
-    const isInvalidAudioError = /Invalid file format/i.test(error.message);
+    const normalizedMessage = String(error?.error?.message || error.message || '').toLowerCase();
+    const isInvalidAudioError = /invalid file format|could not be decoded|format is not supported|audio file is too short/.test(normalizedMessage);
     const statusCode = isConfigError ? 500 : isInvalidAudioError ? 400 : 502;
+    const message = normalizedMessage.includes('too short')
+      ? 'Recording was too short. Hold the mic button longer, then release to send.'
+      : isInvalidAudioError
+        ? 'The recording could not be decoded. Try again and keep holding the mic while speaking.'
+        : 'Voice processing failed';
+
     res.status(statusCode).json({
-      message: isInvalidAudioError
-        ? 'Unsupported or invalid audio file. Use a valid audio recording format.'
-        : 'Voice processing failed',
+      message,
       code: isConfigError
         ? 'VOICE_CONFIG_ERROR'
         : isInvalidAudioError

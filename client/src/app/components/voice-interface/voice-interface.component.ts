@@ -1,13 +1,14 @@
 import { Component, EventEmitter, Input, OnDestroy, OnInit, Output } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { VoiceService } from '../../services/voice.service';
+import { FormsModule } from '@angular/forms';
+import { WebSpeechService, SpeechState } from '../../services/web-speech.service';
 import { ApiService } from '../../services/api.service';
 import { Subscription } from 'rxjs';
 
 @Component({
   selector: 'app-voice-interface',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, FormsModule],
   templateUrl: './voice-interface.component.html',
   styleUrl: './voice-interface.component.scss'
 })
@@ -16,90 +17,101 @@ export class VoiceInterfaceComponent implements OnInit, OnDestroy {
   @Output() aiResponse = new EventEmitter<any>();
   @Output() stateChange = new EventEmitter<'Idle' | 'Listening' | 'Processing' | 'Error'>();
 
-  isRecording = false;
-  isProcessing = false;
-  statusMessage = 'Hold to Speak or Click to Start';
+  conversationActive = false;
+  speechState: SpeechState = 'inactive';
+  interimText = '';             // live partial transcript shown while user speaks
   error: string | null = null;
+  selectedLanguage: 'vi' | 'en' | 'auto' = 'vi';
 
-  private recordingSub!: Subscription;
-  private audioSub!: Subscription;
-  private errorSub!: Subscription;
+  private subs: Subscription[] = [];
 
-  constructor(private voiceService: VoiceService, private apiService: ApiService) {}
+  constructor(
+    public webSpeech: WebSpeechService,
+    private apiService: ApiService
+  ) {}
 
-  ngOnInit() {
+  ngOnInit(): void {
     this.stateChange.emit('Idle');
-    this.recordingSub = this.voiceService.recordingState$.subscribe(state => {
-      this.isRecording = state;
-      if (state) {
-        this.updateStatus('Listening...');
-        this.clearError();
-        this.stateChange.emit('Listening');
-      } else {
-        this.statusMessage = 'Processing AI...';
-      }
-    });
 
-    this.audioSub = this.voiceService.audioBlob$.subscribe(blob => {
-      this.processAudio(blob);
-    });
+    this.subs.push(
+      this.webSpeech.state$.subscribe((state) => {
+        this.speechState = state;
+        if (state === 'inactive') {
+          this.conversationActive = false;
+          this.stateChange.emit('Idle');
+        } else if (state === 'listening' || state === 'capturing' || state === 'speaking') {
+          this.stateChange.emit('Listening');
+        } else if (state === 'processing') {
+          this.stateChange.emit('Processing');
+        }
+      }),
 
-    this.errorSub = this.voiceService.error$.subscribe(err => {
-      this.error = err;
-      this.isRecording = false;
-      this.statusMessage = 'Error accessing microphone';
-      this.stateChange.emit('Error');
-    });
+      this.webSpeech.transcript$.subscribe(({ text, isFinal }) => {
+        this.interimText = isFinal ? '' : text;
+      }),
+
+      this.webSpeech.finalTranscript$.subscribe((transcript) => {
+        this.interimText = '';
+        this.sendTranscript(transcript);
+      }),
+
+      this.webSpeech.error$.subscribe((err) => {
+        this.error = err;
+        this.conversationActive = false;
+        this.stateChange.emit('Error');
+      })
+    );
   }
 
-  ngOnDestroy() {
-    if (this.recordingSub) this.recordingSub.unsubscribe();
-    if (this.audioSub) this.audioSub.unsubscribe();
-    if (this.errorSub) this.errorSub.unsubscribe();
-  }
-
-  toggleRecording() {
-    if (this.isRecording) {
-      this.voiceService.stopRecording();
-    } else {
-      this.voiceService.startRecording();
+  ngOnDestroy(): void {
+    this.subs.forEach((s) => s.unsubscribe());
+    if (this.conversationActive) {
+      this.webSpeech.stop();
     }
   }
 
-  startRecording() {
-    this.voiceService.startRecording();
+  toggleConversation(): void {
+    if (this.conversationActive) {
+      this.webSpeech.stop();
+      this.conversationActive = false;
+      this.interimText = '';
+    } else {
+      if (!this.webSpeech.isSupported) {
+        this.error = 'Speech recognition requires Chrome. Please open in Chrome.';
+        return;
+      }
+      this.error = null;
+      this.conversationActive = true;
+      this.webSpeech.start(this.selectedLanguage);
+    }
   }
 
-  stopRecording() {
-    this.voiceService.stopRecording();
+  get statusLabel(): string {
+    if (!this.conversationActive) return 'Nhấn 🎙 để bắt đầu / Click 🎙 to start';
+    switch (this.speechState) {
+      case 'listening':   return '👂 Đang lắng nghe... / Listening...';
+      case 'capturing':   return '🎙 Đang ghi âm... / Recording...';
+      case 'processing':  return '🤖 Đang phân tích... / Analysing...';
+      case 'speaking':    return '🔊 Trợ lý đang nói... / Assistant speaking...';
+      default:            return 'Sẵn sàng / Ready';
+    }
   }
 
-  private processAudio(blob: Blob) {
-    this.isProcessing = true;
-    this.stateChange.emit('Processing');
-    this.statusMessage = 'Processing AI...';
+  get sessionStateClass(): string {
+    return this.speechState;
+  }
 
-    this.apiService.processVoice(blob, this.currentContext).subscribe({
+  private sendTranscript(transcript: string): void {
+    this.apiService.processText(transcript, this.currentContext, this.selectedLanguage).subscribe({
       next: (response) => {
-        this.isProcessing = false;
-        this.statusMessage = response.message || 'Voice processed successfully!';
-        this.stateChange.emit('Idle');
         this.aiResponse.emit(response);
+        // webSpeech.processingDone() will be called by the parent after TTS finishes
       },
       error: (err) => {
-        this.isProcessing = false;
-        this.error = 'Failed to process voice command: ' + (err.error?.message || err.message);
-        this.statusMessage = 'Hold to Speak or Click to Start';
+        this.error = err.error?.message || err.message || 'Không thể xử lý giọng nói.';
         this.stateChange.emit('Error');
+        this.webSpeech.processingDone();
       }
     });
-  }
-
-  private updateStatus(message: string) {
-    this.statusMessage = message;
-  }
-
-  private clearError() {
-    this.error = null;
   }
 }
