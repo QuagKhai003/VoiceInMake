@@ -4,16 +4,16 @@
   <header class="app-header">
     <div class="header-left">
       <h1>VoiceInMake</h1>
-      <span class="subtitle">Trợ lý hóa đơn · Invoice Assistant</span>
+      <span class="subtitle">Trợ lý hóa đơn</span>
     </div>
     <div class="header-right">
       <span class="backend-dot" [class.ok]="backendStatus === 'Backend OK'"></span>
       <span class="backend-label">{{ backendStatus }}</span>
-      <button class="icon-btn" [class.active]="ttsEnabled" (click)="ttsEnabled = !ttsEnabled" title="Toggle voice output">
+      <button class="icon-btn" [class.active]="ttsEnabled" (click)="ttsEnabled = !ttsEnabled" title="Bật/tắt giọng nói">
         {{ ttsEnabled ? '🔊' : '🔇' }}
       </button>
       <button class="context-toggle" (click)="showContextPanel = !showContextPanel" *ngIf="hasContext">
-        📋 {{ filledFields.length }} trường / fields
+        📋 {{ filledFields.length }} trường
       </button>
     </div>
   </header>
@@ -55,13 +55,6 @@
                 </span>
               </div>
 
-              <!-- Missing fields -->
-              <div class="missing-row" *ngIf="msg.missingFields && msg.missingFields.length">
-                <span class="pill missing" *ngFor="let f of msg.missingFields">
-                  ⚠ {{ fieldLabel(f) }}
-                </span>
-              </div>
-
               <span class="bubble-time">{{ msg.timestamp | date:'HH:mm:ss' }}</span>
             </div>
           </div>
@@ -71,6 +64,18 @@
             {{ msg.text }}
           </div>
 
+        </div>
+
+        <!-- Live interim transcript (user speaking) -->
+        <div class="message user" *ngIf="liveInterimText">
+          <div class="bubble interim-chat-bubble" [class.confirmed]="liveInterimFinal">
+            <span class="bubble-icon">👤</span>
+            <div class="bubble-body">
+              <p class="bubble-text interim-text">
+                <span class="interim-cursor" *ngIf="!liveInterimFinal"></span>{{ liveInterimText }}
+              </p>
+            </div>
+          </div>
         </div>
 
         <!-- Typing indicator while processing -->
@@ -88,7 +93,7 @@
           <div class="bubble">
             <span class="bubble-icon">🔊</span>
             <div class="bubble-body">
-              <p class="bubble-text speaking-text">Đang nói... / Speaking...</p>
+              <p class="bubble-text speaking-text">Đang nói...</p>
             </div>
           </div>
         </div>
@@ -97,7 +102,7 @@
 
     <!-- ── Context side panel (slide in when fields captured) ─── -->
     <aside class="context-panel" [class.visible]="showContextPanel && hasContext">
-      <h3>Dữ liệu hóa đơn / Invoice Data</h3>
+      <h3>Dữ liệu hóa đơn</h3>
       <ul class="field-list">
         <li *ngFor="let f of filledFields" class="field-item">
           <span class="field-label">{{ f.label }}</span>
@@ -105,13 +110,13 @@
         </li>
       </ul>
       <div class="missing-section" *ngIf="missingFields.length">
-        <h4>Còn thiếu / Missing</h4>
+        <h4>Còn thiếu</h4>
         <ul>
           <li *ngFor="let f of missingFields" class="missing-item">{{ fieldLabel(f) }}</li>
         </ul>
       </div>
       <button class="btn-submit" (click)="submitInvoice()" [disabled]="missingFields.length > 0">
-        {{ missingFields.length ? 'Còn thiếu thông tin' : '✅ Tạo hóa đơn / Submit' }}
+        {{ missingFields.length ? 'Còn thiếu thông tin' : '✅ Tạo hóa đơn' }}
       </button>
     </aside>
 
@@ -124,7 +129,8 @@
     <app-voice-interface
       [currentContext]="masterContext"
       (aiResponse)="handleAiResponse($event)"
-      (stateChange)="handleStateChange($event)">
+      (stateChange)="handleStateChange($event)"
+      (interimTranscript)="handleInterimTranscript($event)">
     </app-voice-interface>
 
     <!-- Recommended next action -->

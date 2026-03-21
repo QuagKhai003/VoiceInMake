@@ -25,29 +25,45 @@ const extractJson = (rawText) => {
 };
 
 const systemPrompt = `
-You are a structured extraction assistant. The user may speak in Vietnamese or English.
-Convert every transcript into a JSON object with the following keys:
-- buyerName (string) — tên người mua / buyer or company name
-- taxId (string) — mã số thuế / tax identification number
-- vatNumber (string) — số VAT / VAT registration number
-- buyerAddress (string) — địa chỉ / buyer address
-- invoiceType (string) — loại hóa đơn / invoice type (e.g. digital, printed)
-- issueDate (ISO 8601 date string) — ngày phát hành / issue date
-- lineItems (array of { description, quantity, unitPrice, vatRate, lineTotal }) — danh sách hàng hóa / line items
+Bạn là trợ lý tạo hóa đơn thông minh. Người dùng có thể nói tiếng Việt hoặc tiếng Anh, nhưng bạn LUÔN trả lời bằng tiếng Việt.
 
-Understand Vietnamese number words: "nghìn"=1000, "triệu"=1000000, "phần trăm"=percent, "chiếc/cái"=unit.
-Only reply with the JSON object. Use null or empty arrays for missing values.
+Nhiệm vụ của bạn:
+1. Trích xuất thông tin hóa đơn từ lời nói của người dùng
+2. Trả lời tự nhiên, thân thiện như một cuộc trò chuyện thật
+
+Trả về JSON với các trường:
+- extractedFields: object chứa các trường đã trích xuất:
+  - buyerName (string) — tên người mua / công ty
+  - taxId (string) — mã số thuế
+  - vatNumber (string) — số VAT
+  - buyerAddress (string) — địa chỉ người mua
+  - invoiceType (string) — loại hóa đơn (điện tử / giấy)
+  - issueDate (ISO 8601 date string) — ngày phát hành
+  - lineItems (array of { description, quantity, unitPrice, vatRate, lineTotal }) — hàng hóa / dịch vụ
+- assistantResponse (string) — câu trả lời tự nhiên bằng tiếng Việt
+
+Quy tắc cho assistantResponse:
+- Nói chuyện tự nhiên, thân thiện, ngắn gọn (1-2 câu)
+- Nếu người dùng vừa cung cấp thông tin, xác nhận lại những gì bạn đã ghi nhận
+- Nếu còn thiếu thông tin, hỏi tiếp một cách tự nhiên (không liệt kê)
+- Nếu đủ thông tin, hỏi người dùng có muốn gửi hóa đơn không
+- Nếu người dùng nói chuyện phiếm hoặc hỏi gì đó, trả lời bình thường rồi quay lại hóa đơn
+- Hiểu số tiếng Việt: "nghìn"=1000, "triệu"=1000000, "phần trăm"=percent, "chiếc/cái"=đơn vị
+
+Dùng null hoặc mảng rỗng cho các giá trị chưa có. Chỉ trả về JSON, không markdown.
 `.trim();
 
-const buildUserPrompt = (transcript, context) => {
-  const contextText = context ? JSON.stringify(context) : 'None';
-  return `Transcript:
-${transcript}
+const buildUserPrompt = (transcript, context, missingFields) => {
+  const contextText = context && Object.keys(context).length ? JSON.stringify(context) : 'Chưa có thông tin nào';
+  const missingText = missingFields?.length ? missingFields.join(', ') : 'Không còn thiếu';
+  return `Người dùng nói: "${transcript}"
 
-Context:
+Thông tin đã thu thập:
 ${contextText}
 
-Return the JSON payload described in the system instructions.`;
+Trường còn thiếu: ${missingText}
+
+Trả về JSON với extractedFields và assistantResponse.`;
 };
 
 const parseDateValue = (value) => {
@@ -124,69 +140,11 @@ const determineMissingFields = (entities = {}) => {
   return missing;
 };
 
-const generateAssistantResponse = (missingFields = [], intent = 'collect_more', capturedFields = []) => {
-  if (intent === 'submit') {
-    return 'Hoàn tất! Đang tạo hóa đơn. / All done! Submitting your invoice now.';
-  }
-  if (!missingFields.length) {
-    return (
-      'Tuyệt vời! Tôi đã có đủ thông tin. Bạn có muốn tạo hóa đơn ngay bây giờ không? Hãy nói "gửi hóa đơn" để xác nhận.\n' +
-      'Great! All required details are captured. Say "submit invoice" to confirm, or review the fields on the right.'
-    );
-  }
-
-  const remaining = missingFields.length;
-  const target = missingFields[0];
-
-  // Acknowledgement phrases when something was just captured
-  const acks = [
-    'Tốt lắm! / Got it!',
-    'Được rồi! / Noted!',
-    'Cảm ơn! / Thanks!',
-    'OK!'
-  ];
-  const ack = capturedFields.length
-    ? acks[capturedFields.length % acks.length] + ' '
-    : '';
-
-  const questions = {
-    buyerName: (
-      `${ack}Hóa đơn này dành cho ai? Hãy nói tên công ty hoặc tên người mua.\n` +
-      `(${ack}Who is this invoice for? Say the buyer or company name.)`
-    ),
-    taxId: (
-      `${ack}Mã số thuế của người mua là gì? Đọc từng chữ số rõ ràng.\n` +
-      `(${ack}What's the buyer's tax ID? Read each digit clearly.)`
-    ),
-    vatNumber: (
-      `${ack}Bạn có số VAT không? Nếu không có hãy nói "bỏ qua".\n` +
-      `(${ack}Do you have a VAT number? Say "skip" if none.)`
-    ),
-    buyerAddress: (
-      `${ack}Địa chỉ của người mua là gì? Nói số nhà, đường, quận, thành phố.\n` +
-      `(${ack}What's the buyer's address? Include street, district, city.)`
-    ),
-    invoiceType: (
-      `${ack}Đây là hóa đơn điện tử hay giấy? Nói "điện tử" hoặc "giấy".\n` +
-      `(${ack}Digital or printed invoice? Say "digital" or "printed".)`
-    ),
-    issueDate: (
-      `${ack}Ngày phát hành hóa đơn là ngày nào?\n` +
-      `(${ack}What is the invoice issue date? E.g. "March 15, 2026".)`
-    ),
-    lineItems: (
-      `${ack}Hàng hóa hoặc dịch vụ là gì? Ví dụ: "Tư vấn, 1 cái, 5 triệu, VAT 10%".\n` +
-      `(${ack}What are the items? E.g. "Consulting, qty 1, 5 million, VAT 10%".)`
-    )
-  };
-
-  const suffix = remaining > 1 ? ` (còn ${remaining - 1} trường nữa / ${remaining - 1} more fields)` : '';
-  return (questions[target] || `${ack}Vui lòng cung cấp: ${target}. / Please provide: ${target}.`) + suffix;
-};
 
 const shouldSubmitNow = (transcript = '') => {
   const value = String(transcript).toLowerCase();
-  return /\b(submit|send|finalize|finish|done)\b/.test(value);
+  return /\b(submit|send|finalize|finish|done)\b/.test(value) ||
+    /gửi hóa đơn|gửi hoá đơn|xác nhận|hoàn tất|xong rồi|gửi đi/.test(value);
 };
 
 const buildIntent = (missingFields = [], transcript = '') => {
@@ -225,28 +183,32 @@ exports.extractInvoiceEntities = async (transcript, context = {}) => {
     throw new Error('Transcript is required for extraction');
   }
 
+  // Pre-compute missing fields from current context to inform GPT
+  const currentEntities = normalizeEntities(context);
+  const currentMissing = determineMissingFields(currentEntities);
+
   const client = getClient();
   const completion = await client.chat.completions.create({
     model: 'gpt-4o',
-    temperature: 0,
+    temperature: 0.7,
     messages: [
       { role: 'system', content: systemPrompt },
-      { role: 'user', content: buildUserPrompt(transcript, context) }
+      { role: 'user', content: buildUserPrompt(transcript, context, currentMissing) }
     ]
   });
 
   const rawText = completion?.choices?.[0]?.message?.content ?? '';
-  const extracted = extractJson(rawText);
+  const parsed = extractJson(rawText);
+  const extracted = parsed.extractedFields || parsed;
   const mergedEntities = mergeContexts(context, extracted);
   const missingFields = determineMissingFields(mergedEntities);
   const intent = buildIntent(missingFields, transcript);
-
-  // Fields that were just newly captured in this turn (not already in context)
-  const newlyCaptured = HEADER_FIELDS.filter(
-    (f) => mergedEntities[f] && !String(context[f] ?? '').trim()
-  );
-  const assistantResponse = generateAssistantResponse(missingFields, intent, newlyCaptured);
   const confidence = buildConfidence(missingFields);
+
+  // Use GPT-generated response, fall back to simple prompt if missing
+  const assistantResponse = parsed.assistantResponse ||
+    (missingFields.length ? 'Bạn có thể cho tôi biết thêm thông tin không?' : 'Đã đủ thông tin. Bạn có muốn gửi hóa đơn không?');
+
   const normalizedContext = {
     ...mergedEntities,
     assistantMetadata: {
@@ -269,4 +231,3 @@ exports.extractInvoiceEntities = async (transcript, context = {}) => {
 };
 
 exports.extractInvoiceData = exports.extractInvoiceEntities;
-exports.generateAssistantResponse = generateAssistantResponse;

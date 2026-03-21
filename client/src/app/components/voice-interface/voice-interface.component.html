@@ -2,7 +2,7 @@
 
   <!-- Language selector -->
   <div class="language-row">
-    <span class="lang-label">Ngôn ngữ / Language:</span>
+    <span class="lang-label">Ngôn ngữ:</span>
     <div class="lang-options">
       <button class="lang-btn" [class.selected]="selectedLanguage === 'vi'" (click)="selectedLanguage = 'vi'">🇻🇳 Tiếng Việt</button>
       <button class="lang-btn" [class.selected]="selectedLanguage === 'en'" (click)="selectedLanguage = 'en'">🇺🇸 English</button>
@@ -30,17 +30,12 @@
     {{ error || statusLabel }}
   </p>
 
-  <!-- Live interim transcript bubble -->
-  <div class="interim-bubble" *ngIf="interimText" [class.confirmed]="isFinalTranscript">
-    <span class="interim-cursor" *ngIf="!isFinalTranscript"></span>{{ interimText }}
-  </div>
-
   <!-- Hint -->
   <p class="hint" *ngIf="!conversationActive && !error">
-    Nhấn 🎙, nói tự do, dừng lại để gửi — / Press 🎙, speak freely, pause to send
+    Nhấn 🎙, nói tự do, dừng lại để gửi
   </p>
   <p class="hint active-hint" *ngIf="conversationActive && speechState === 'listening'">
-    Đang lắng nghe — hãy nói bất cứ điều gì / Listening — say anything
+    Đang lắng nghe — hãy nói bất cứ điều gì
   </p>
 
 </div>

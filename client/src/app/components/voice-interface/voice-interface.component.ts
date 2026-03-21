@@ -17,6 +17,7 @@ export class VoiceInterfaceComponent implements OnInit, OnDestroy {
   @Input() currentContext: any = {};
   @Output() aiResponse = new EventEmitter<any>();
   @Output() stateChange = new EventEmitter<'Idle' | 'Listening' | 'Processing' | 'Error'>();
+  @Output() interimTranscript = new EventEmitter<{ text: string; isFinal: boolean }>();
 
   conversationActive = false;
   speechState: SpeechState = 'inactive';
@@ -53,6 +54,7 @@ export class VoiceInterfaceComponent implements OnInit, OnDestroy {
       this.webSpeech.transcript$.subscribe(({ text, isFinal }) => {
         this.interimText = text;
         this.isFinalTranscript = isFinal;
+        this.interimTranscript.emit({ text, isFinal });
       }),
 
       this.webSpeech.finalTranscript$.subscribe((transcript) => {
@@ -87,7 +89,7 @@ export class VoiceInterfaceComponent implements OnInit, OnDestroy {
       this.interimText = '';
     } else {
       if (!this.webSpeech.isSupported) {
-        this.error = 'Speech recognition requires Chrome. Please open in Chrome.';
+        this.error = 'Nhận dạng giọng nói yêu cầu trình duyệt Chrome. Vui lòng mở bằng Chrome.';
         return;
       }
       this.error = null;
@@ -98,13 +100,13 @@ export class VoiceInterfaceComponent implements OnInit, OnDestroy {
   }
 
   get statusLabel(): string {
-    if (!this.conversationActive) return 'Nhấn 🎙 để bắt đầu / Click 🎙 to start';
+    if (!this.conversationActive) return 'Nhấn 🎙 để bắt đầu';
     switch (this.speechState) {
-      case 'listening':   return '👂 Đang lắng nghe... / Listening...';
-      case 'capturing':   return '🎙 Đang ghi âm... / Recording...';
-      case 'processing':  return '🤖 Đang phân tích... / Analysing...';
-      case 'speaking':    return '🔊 Trợ lý đang nói... / Assistant speaking...';
-      default:            return 'Sẵn sàng / Ready';
+      case 'listening':   return '👂 Đang lắng nghe...';
+      case 'capturing':   return '🎙 Đang ghi âm...';
+      case 'processing':  return '🤖 Đang phân tích...';
+      case 'speaking':    return '🔊 Trợ lý đang nói...';
+      default:            return 'Sẵn sàng';
     }
   }
 

@@ -217,6 +217,37 @@
   50%       { opacity: 0.5; }
 }
 
+/* ── Interim transcript in chatbox ─────────────────────────────── */
+.interim-chat-bubble {
+  opacity: 0.85;
+  border: 1px dashed rgba(126, 173, 255, 0.3) !important;
+  background: rgba(126, 173, 255, 0.06) !important;
+}
+
+.interim-chat-bubble.confirmed {
+  border-color: rgba(126, 255, 160, 0.4) !important;
+}
+
+.interim-text {
+  font-style: italic;
+  color: #c8d8ff !important;
+}
+
+.interim-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 0.85em;
+  background: #7eadff;
+  margin-right: 4px;
+  vertical-align: middle;
+  animation: cursor-blink 0.8s step-end infinite;
+}
+
+@keyframes cursor-blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0; }
+}
+
 /* ── Extracted / missing pills ────────────────────────────────── */
 .extracted-pills, .missing-row {
   display: flex;

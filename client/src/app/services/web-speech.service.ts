@@ -91,6 +91,10 @@ export class WebSpeechService {
     this.aiTalking = true;
     this.state$.next('speaking');
     this.clearInactivityTimer();
+    // Ensure recognition is running so we can detect barge-in
+    if (this.active && (!this.recognition || this.isRecognitionStopped())) {
+      this.startRecognition();
+    }
   }
 
   /** Call when AI finishes speaking — user's turn again. */
@@ -185,7 +189,10 @@ export class WebSpeechService {
         this.state$.next('processing');
         this.finalTranscript$.next(text);
         this.pendingFinal = '';
-        // Don't restart recognition until processingDone() / aiFinishedSpeaking()
+        // If AI is talking (barge-in just happened), restart recognition to keep listening
+        if (this.aiTalking) {
+          setTimeout(() => { if (this.active) this.startRecognition(); }, 150);
+        }
         return;
       }
 
