@@ -9,6 +9,7 @@ const upload = multer({
 
 const router = express.Router();
 
+router.post('/text', voiceController.processText);
 router.post('/', upload.single('audio'), voiceController.processVoice);
 
 module.exports = router;
