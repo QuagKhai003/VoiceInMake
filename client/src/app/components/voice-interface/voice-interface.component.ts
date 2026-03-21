@@ -14,6 +14,7 @@ import { Subscription } from 'rxjs';
 export class VoiceInterfaceComponent implements OnInit, OnDestroy {
   @Input() currentContext: any = {};
   @Output() aiResponse = new EventEmitter<any>();
+  @Output() stateChange = new EventEmitter<'Idle' | 'Listening' | 'Processing' | 'Error'>();
 
   isRecording = false;
   isProcessing = false;
@@ -27,11 +28,15 @@ export class VoiceInterfaceComponent implements OnInit, OnDestroy {
   constructor(private voiceService: VoiceService, private apiService: ApiService) {}
 
   ngOnInit() {
+    this.stateChange.emit('Idle');
     this.recordingSub = this.voiceService.recordingState$.subscribe(state => {
       this.isRecording = state;
       if (state) {
-        this.statusMessage = 'Listening...';
-        this.error = null;
+        this.updateStatus('Listening...');
+        this.clearError();
+        this.stateChange.emit('Listening');
+      } else {
+        this.statusMessage = 'Processing AI...';
       }
     });
 
@@ -43,6 +48,7 @@ export class VoiceInterfaceComponent implements OnInit, OnDestroy {
       this.error = err;
       this.isRecording = false;
       this.statusMessage = 'Error accessing microphone';
+      this.stateChange.emit('Error');
     });
   }
 
@@ -70,19 +76,30 @@ export class VoiceInterfaceComponent implements OnInit, OnDestroy {
 
   private processAudio(blob: Blob) {
     this.isProcessing = true;
+    this.stateChange.emit('Processing');
     this.statusMessage = 'Processing AI...';
 
     this.apiService.processVoice(blob, this.currentContext).subscribe({
       next: (response) => {
         this.isProcessing = false;
         this.statusMessage = response.message || 'Voice processed successfully!';
+        this.stateChange.emit('Idle');
         this.aiResponse.emit(response);
       },
       error: (err) => {
         this.isProcessing = false;
         this.error = 'Failed to process voice command: ' + (err.error?.message || err.message);
         this.statusMessage = 'Hold to Speak or Click to Start';
+        this.stateChange.emit('Error');
       }
     });
+  }
+
+  private updateStatus(message: string) {
+    this.statusMessage = message;
+  }
+
+  private clearError() {
+    this.error = null;
   }
 }

@@ -1,6 +1,6 @@
 const mongoose = require('mongoose');
 const Invoice = require('../models/Invoice');
-const REQUIRED_FIELDS = ['buyerName', 'taxId', 'vatNumber', 'buyerAddress', 'invoiceType', 'issueDate', 'lineItems'];
+const REQUIRED_FIELDS = ['buyerName', 'taxId', 'vatNumber', 'buyerAddress', 'invoiceType', 'lineItems'];
 
 const ensureDbReady = (res) => {
   if (mongoose.connection.readyState !== 1) {
@@ -55,11 +55,13 @@ const computeMissingFields = (payload = {}) => {
     if (field === 'lineItems') {
       return !Array.isArray(payload.lineItems) || payload.lineItems.length === 0;
     }
-    if (field === 'issueDate') {
-      return !(payload.issueDate instanceof Date) || Number.isNaN(payload.issueDate.getTime());
-    }
     return !String(payload[field] ?? '').trim();
   });
+
+  if (!(payload.issueDate instanceof Date) || Number.isNaN(payload.issueDate.getTime())) {
+    missing.push('issueDate');
+  }
+
   return missing;
 };
 

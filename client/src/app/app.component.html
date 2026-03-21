@@ -1,27 +1,76 @@
 <header class="app-header">
-  <h1>🎙️ VoiceInMake</h1>
-  <span class="subtitle">Voice-Driven Invoice Automation</span>
+  <div>
+    <h1>VoiceInMake</h1>
+    <p class="subtitle">Assistant-guided invoice coordination for vinvoice.com</p>
+  </div>
+  <div class="status-pill">
+    Backend: <strong>{{ backendStatus }}</strong>
+  </div>
 </header>
 
 <main class="app-main">
   <router-outlet></router-outlet>
-  
+
   <div class="success-banner" *ngIf="submissionMessage">
     {{ submissionMessage }}
   </div>
 
-  <app-voice-interface 
-    [currentContext]="masterContext"
-    (aiResponse)="handleAiResponse($event)">
-  </app-voice-interface>
+  <section class="assistant-panel">
+    <div class="state-row">
+      <div class="state-chip" [ngClass]="assistantStateClass">
+        {{ assistantState }}
+      </div>
+      <div class="state-message">
+        {{ assistantMessage }}
+      </div>
+    </div>
 
-  <app-invoice-context-log 
-    [context]="masterContext"
-    (contextChange)="masterContext = $event"
-    (submitInvoice)="submitInvoice()">
-  </app-invoice-context-log>
+    <app-voice-interface 
+      [currentContext]="masterContext"
+      (aiResponse)="handleAiResponse($event)"
+      (stateChange)="handleStateChange($event)">
+    </app-voice-interface>
+
+    <div class="website-context">
+      <label for="website-context">Share current website view</label>
+      <textarea 
+        id="website-context"
+        [(ngModel)]="websiteContext"
+        placeholder="e.g., Digital Invoice tab open, fields visible, awaiting price input">
+      </textarea>
+      <button class="btn-plan" (click)="requestPlanning()">
+        {{ planLoading ? 'Planning…' : 'Request Suggested Action' }}
+      </button>
+      <p class="helper-text">Recommended actions will reflect the latest context and transcript.</p>
+    </div>
+  </section>
+
+  <section class="insights-panel">
+    <div class="insight-card" *ngIf="missingFields.length">
+      <h3>Missing Fields</h3>
+      <ul>
+        <li *ngFor="let field of missingFields">
+          {{ field }}
+        </li>
+      </ul>
+    </div>
+
+    <div class="insight-card">
+      <h3>Recommended Actions</h3>
+      <p class="helper-text" *ngIf="planLoading">Gathering guidance from the assistant…</p>
+      <p class="helper-text" *ngIf="!planLoading && !recommendedActions.length">Run a plan request to see what the assistant suggests.</p>
+      <p class="helper-text" *ngIf="planError">{{ planError }}</p>
+      <ul *ngIf="recommendedActions.length">
+        <li *ngFor="let action of recommendedActions">
+          {{ action }}
+        </li>
+      </ul>
+    </div>
+
+    <app-invoice-context-log 
+      [context]="masterContext"
+      (contextChange)="handleContextChange($event)"
+      (submitInvoice)="submitInvoice()">
+    </app-invoice-context-log>
+  </section>
 </main>
-
-<footer class="app-status-bar">
-  <span class="status-indicator">Status: {{ backendStatus }}</span>
-</footer>

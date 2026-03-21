@@ -5,6 +5,8 @@ const morgan = require('morgan');
 const connectDB = require('./config/db');
 const healthRoutes = require('./routes/healthRoutes');
 const invoiceRoutes = require('./routes/invoiceRoutes');
+const voiceRoutes = require('./routes/voiceRoutes');
+const assistantRoutes = require('./routes/assistantRoutes');
 const errorHandler = require('./middleware/errorHandler');
 
 const app = express();
@@ -18,6 +20,8 @@ app.use(express.json());
 // Routes
 app.use('/api/health', healthRoutes);
 app.use('/api/invoice', invoiceRoutes);
+app.use('/api/voice', voiceRoutes);
+app.use('/api/assistant', assistantRoutes);
 
 // Error handler (must be after routes)
 app.use(errorHandler);

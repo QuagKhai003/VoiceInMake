@@ -26,4 +26,17 @@ export class ApiService {
 
     return this.http.post(`${this.baseUrl}/voice`, formData);
   }
+
+  planAssistant(invoiceContext: any, websiteContext: string, transcript?: string): Observable<any> {
+    const payload: any = {
+      invoiceContext,
+      websiteContext: websiteContext.trim()
+    };
+
+    if (transcript) {
+      payload.transcript = transcript;
+    }
+
+    return this.http.post(`${this.baseUrl}/assistant/plan`, payload);
+  }
 }
