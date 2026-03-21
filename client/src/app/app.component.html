@@ -1,0 +1,27 @@
+<header class="app-header">
+  <h1>🎙️ VoiceInMake</h1>
+  <span class="subtitle">Voice-Driven Invoice Automation</span>
+</header>
+
+<main class="app-main">
+  <router-outlet></router-outlet>
+  
+  <div class="success-banner" *ngIf="submissionMessage">
+    {{ submissionMessage }}
+  </div>
+
+  <app-voice-interface 
+    [currentContext]="masterContext"
+    (aiResponse)="handleAiResponse($event)">
+  </app-voice-interface>
+
+  <app-invoice-context-log 
+    [context]="masterContext"
+    (contextChange)="masterContext = $event"
+    (submitInvoice)="submitInvoice()">
+  </app-invoice-context-log>
+</main>
+
+<footer class="app-status-bar">
+  <span class="status-indicator">Status: {{ backendStatus }}</span>
+</footer>

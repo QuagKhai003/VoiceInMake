@@ -1,0 +1,34 @@
+<div class="context-log-container" *ngIf="objectKeys(context).length > 0">
+  <h3>Assistant Memory (Context)</h3>
+  <p class="hint">Click any value to edit it before submission.</p>
+
+  <ul class="context-list">
+    <li *ngFor="let item of context | keyvalue" class="context-item">
+      <span class="key">{{ item.key }}:</span>
+      
+      <!-- Display Mode -->
+      <span 
+        class="value display" 
+        *ngIf="editingKey !== item.key"
+        (click)="startEdit(item.key, item.value)">
+        {{ item.value | json }}
+      </span>
+
+      <!-- Edit Mode -->
+      <div class="value edit" *ngIf="editingKey === item.key">
+        <input 
+          type="text" 
+          [(ngModel)]="editValue" 
+          (keyup.enter)="saveEdit(item.key)"
+          (keyup.escape)="cancelEdit()"
+          autoFocus>
+        <button class="btn-save" (click)="saveEdit(item.key)">Save</button>
+        <button class="btn-cancel" (click)="cancelEdit()">Cancel</button>
+      </div>
+    </li>
+  </ul>
+
+  <button class="btn-submit" (click)="onSubmit()">
+    Confirm & Create Invoice
+  </button>
+</div>

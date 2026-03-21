@@ -1,0 +1,41 @@
+<div class="voice-invoice-container">
+  <div class="voice-interface">
+    <div class="status-indicator" [ngClass]="state.toLowerCase().replace(' ', '-')">
+      <span class="pulse-ring" *ngIf="state === 'Listening'"></span>
+      <h2>Agent State: {{ state }}</h2>
+    </div>
+    
+    <p class="status-message">{{ statusMessage }}</p>
+
+    <button 
+      class="btn-simulate" 
+      (click)="simulateVoiceCommand()" 
+      [disabled]="state === 'Listening' || state === 'Thinking'">
+      🎙️ Simulate Voice Command
+    </button>
+  </div>
+
+  <div class="invoice-form-section" *ngIf="invoiceForm.get('clientName')?.value || state === 'Success' || state === 'Error'">
+    <h3>Extracted Invoice Data</h3>
+    <form [formGroup]="invoiceForm" (ngSubmit)="submitInvoice()">
+      <div class="form-group">
+        <label for="clientName">Client Name</label>
+        <input id="clientName" type="text" formControlName="clientName" placeholder="e.g., Acme Corp">
+      </div>
+
+      <div class="form-group">
+        <label for="amount">Amount ($)</label>
+        <input id="amount" type="number" formControlName="amount" placeholder="e.g., 500">
+      </div>
+
+      <div class="form-group">
+        <label for="description">Description</label>
+        <textarea id="description" formControlName="description" placeholder="e.g., Web development services"></textarea>
+      </div>
+
+      <button type="submit" class="btn-submit" [disabled]="invoiceForm.invalid">
+        Submit Invoice
+      </button>
+    </form>
+  </div>
+</div>
