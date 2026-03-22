@@ -8,6 +8,7 @@ const invoiceRoutes = require('./routes/invoiceRoutes');
 const voiceRoutes = require('./routes/voiceRoutes');
 const assistantRoutes = require('./routes/assistantRoutes');
 const ttsRoutes = require('./routes/ttsRoutes');
+const automationRoutes = require('./routes/automationRoutes');
 const errorHandler = require('./middleware/errorHandler');
 
 const app = express();
@@ -24,6 +25,7 @@ app.use('/api/invoice', invoiceRoutes);
 app.use('/api/voice', voiceRoutes);
 app.use('/api/assistant', assistantRoutes);
 app.use('/api/tts', ttsRoutes);
+app.use('/api/automation', automationRoutes);
 
 // Error handler (must be after routes)
 app.use(errorHandler);

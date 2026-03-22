@@ -15,6 +15,7 @@ import { Subscription } from 'rxjs';
 })
 export class VoiceInterfaceComponent implements OnInit, OnDestroy {
   @Input() currentContext: any = {};
+  @Input() automationContext: any = {};
   @Output() aiResponse = new EventEmitter<any>();
   @Output() stateChange = new EventEmitter<'Idle' | 'Listening' | 'Processing' | 'Error'>();
   @Output() interimTranscript = new EventEmitter<{ text: string; isFinal: boolean }>();
@@ -115,7 +116,7 @@ export class VoiceInterfaceComponent implements OnInit, OnDestroy {
   }
 
   private sendTranscript(transcript: string): void {
-    this.apiService.processText(transcript, this.currentContext, this.selectedLanguage).subscribe({
+    this.apiService.processText(transcript, this.currentContext, this.selectedLanguage, this.automationContext).subscribe({
       next: (response) => {
         this.aiResponse.emit(response);
         // webSpeech.processingDone() will be called by the parent after TTS finishes

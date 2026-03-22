@@ -28,10 +28,11 @@ export class ApiService {
     return this.http.post(`${this.baseUrl}/voice`, formData);
   }
 
-  processText(transcript: string, currentContext: any = {}, language: string = 'vi'): Observable<any> {
+  processText(transcript: string, currentContext: any = {}, language: string = 'vi', automationContext: any = {}): Observable<any> {
     return this.http.post(`${this.baseUrl}/voice/text`, {
       transcript,
       context: currentContext,
+      automationContext,
       language
     });
   }
@@ -47,5 +48,17 @@ export class ApiService {
     }
 
     return this.http.post(`${this.baseUrl}/assistant/plan`, payload);
+  }
+
+  startAutomation(websiteUrl: string, credentials: { username: string; password: string }, invoiceData: any): Observable<any> {
+    return this.http.post(`${this.baseUrl}/automation/start`, { websiteUrl, credentials, invoiceData });
+  }
+
+  stopAutomation(): Observable<any> {
+    return this.http.post(`${this.baseUrl}/automation/stop`, {});
+  }
+
+  automationEvents(): EventSource {
+    return new EventSource(`${this.baseUrl}/automation/events`);
   }
 }
