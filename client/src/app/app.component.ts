@@ -12,6 +12,8 @@ import { Subscription } from 'rxjs';
 export interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
   text: string;
+  displayText?: string;        // text revealed so far (typing effect)
+  isTyping?: boolean;           // true while typing animation is active
   extractedFields?: { [key: string]: any };
   missingFields?: string[];
   timestamp: Date;
@@ -35,6 +37,7 @@ export class AppComponent implements OnInit, AfterViewChecked, OnDestroy {
   submissionMessage: string | null = null;
 
   masterContext: { [key: string]: any } = {};
+  automationContext: { websiteUrl?: string; username?: string; password?: string } = {};
   missingFields: string[] = [];
   recommendedActions: any[] = [];
   chatMessages: ChatMessage[] = [];
@@ -43,9 +46,14 @@ export class AppComponent implements OnInit, AfterViewChecked, OnDestroy {
   ttsEnabled = true;
   liveInterimText = '';
   liveInterimFinal = false;
+  automationRunning = false;
+  automationStatus = '';
+  textInput = '';
   private shouldScrollChat = false;
   private lastTranscript = '';
   private speakingSub!: Subscription;
+  private typingTimer: any = null;
+  private eventSource: EventSource | null = null;
 
   readonly fieldLabels: { [key: string]: string } = {
     buyerName:    'Tên người mua',
@@ -75,10 +83,11 @@ export class AppComponent implements OnInit, AfterViewChecked, OnDestroy {
     // Inactivity: nudge user when mic is open but silent
     this.webSpeech.inactivity$.subscribe(() => this.promptNextMissingField());
 
-    // Barge-in: user spoke while AI was talking — cut TTS immediately
+    // Barge-in: user spoke while AI was talking — cut TTS and finish typing
     this.webSpeech.bargeIn$.subscribe(() => {
       this.ttsService.stop();
       this.isSpeaking = false;
+      this.finishTyping();
     });
 
     // Greeting
@@ -89,6 +98,8 @@ export class AppComponent implements OnInit, AfterViewChecked, OnDestroy {
   ngOnDestroy(): void {
     this.speakingSub?.unsubscribe();
     this.ttsService.stop();
+    this.finishTyping();
+    this.stopAutomationListener();
   }
 
   ngAfterViewChecked(): void {
@@ -96,6 +107,27 @@ export class AppComponent implements OnInit, AfterViewChecked, OnDestroy {
       this.scrollChatToBottom();
       this.shouldScrollChat = false;
     }
+  }
+
+  // ── Text input ──────────────────────────────────────────────────
+
+  sendTextInput(): void {
+    const text = this.textInput.trim();
+    if (!text) return;
+    this.textInput = '';
+    this.assistantState = 'Processing';
+    this.chatMessages.push({ role: 'user', text, timestamp: new Date() });
+    this.shouldScrollChat = true;
+
+    this.apiService.processText(text, this.masterContext, 'vi', this.automationContext).subscribe({
+      next: (response) => {
+        this.handleAiResponse({ ...response, transcript: undefined }); // don't duplicate user msg
+      },
+      error: (err) => {
+        this.pushSystemMessage(`❌ ${err.error?.message || err.message || 'Lỗi xử lý'}`);
+        this.assistantState = 'Idle';
+      }
+    });
   }
 
   // ── Voice events ──────────────────────────────────────────────────
@@ -109,32 +141,31 @@ export class AppComponent implements OnInit, AfterViewChecked, OnDestroy {
     }
 
     if (response.extractedEntities) {
-      this.masterContext = { ...this.masterContext, ...response.extractedEntities };
+      this.masterContext = { ...response.extractedEntities };
     }
-    this.missingFields = response.missingFields ?? [];
 
-    const assistantText = response.assistantResponse ?? response.message ?? '';
+    // Merge automation fields (website URL, credentials)
+    if (response.automationFields) {
+      const auto = response.automationFields;
+      if (auto.websiteUrl) this.automationContext.websiteUrl = auto.websiteUrl;
+      if (auto.username) this.automationContext.username = auto.username;
+      if (auto.password) this.automationContext.password = auto.password;
+    }
+
+    const assistantText = response.assistantResponse ?? '';
     const lang = response.language ?? 'vi';
     if (assistantText) {
-      this.pushAssistantMessage(assistantText, response.extractedEntities ?? {}, this.missingFields, lang);
+      this.pushAssistantMessage(assistantText, response.extractedEntities ?? {}, [], lang);
     }
 
-    if (response.intent === 'submit') {
-      this.assistantState = 'Ready';
-      this.submitInvoice();
+    // Start browser automation when we have all info
+    if (response.intent === 'start_automation') {
+      this.startAutomation();
       return;
     }
 
-    this.assistantState = this.missingFields.length > 0 ? 'Needs Info' : 'Ready';
+    this.assistantState = 'Idle';
     this.shouldScrollChat = true;
-
-    // Request planning guidance (fires in parallel with TTS) — only update actions, don't speak
-    this.apiService.planAssistant(this.masterContext, '', this.lastTranscript).subscribe({
-      next: (plan) => {
-        this.recommendedActions = plan?.recommendedActions ?? [];
-      },
-      error: () => {}
-    });
   }
 
   handleInterimTranscript(event: { text: string; isFinal: boolean }): void {
@@ -151,6 +182,66 @@ export class AppComponent implements OnInit, AfterViewChecked, OnDestroy {
 
   handleContextChange(updatedContext: { [key: string]: any }): void {
     this.masterContext = { ...updatedContext };
+  }
+
+  // ── Automation ──────────────────────────────────────────────────────
+
+  startAutomation(): void {
+    const { websiteUrl, username, password } = this.automationContext;
+    if (!websiteUrl || !username || !password) {
+      this.pushAssistantMessage('Chưa đủ thông tin để tự động hóa. Vui lòng cung cấp URL, tên đăng nhập và mật khẩu.', {}, []);
+      return;
+    }
+
+    this.automationRunning = true;
+    this.assistantState = 'Processing';
+    this.pushAssistantMessage('Đang bắt đầu tự động điền hóa đơn trên website...', {}, []);
+
+    // Start SSE listener
+    this.eventSource = this.apiService.automationEvents();
+    this.eventSource.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      this.automationStatus = data.status || '';
+      this.shouldScrollChat = true;
+
+      if (data.event === 'status' || data.event === 'action') {
+        this.pushSystemMessage(`🤖 ${data.status}`);
+      } else if (data.event === 'done') {
+        this.pushAssistantMessage(data.status, {}, []);
+        this.stopAutomationListener();
+        this.automationRunning = false;
+        this.assistantState = 'Idle';
+      } else if (data.event === 'error') {
+        this.pushSystemMessage(`❌ ${data.status}`);
+      }
+    };
+    this.eventSource.onerror = () => {
+      this.stopAutomationListener();
+    };
+
+    // Trigger the automation
+    this.apiService.startAutomation(websiteUrl, { username, password }, this.masterContext).subscribe({
+      error: (err) => {
+        this.pushSystemMessage(`❌ Lỗi: ${err.error?.message || err.message}`);
+        this.stopAutomationListener();
+        this.automationRunning = false;
+        this.assistantState = 'Idle';
+      }
+    });
+  }
+
+  stopAutomation(): void {
+    this.apiService.stopAutomation().subscribe();
+    this.stopAutomationListener();
+    this.automationRunning = false;
+    this.assistantState = 'Idle';
+  }
+
+  private stopAutomationListener(): void {
+    if (this.eventSource) {
+      this.eventSource.close();
+      this.eventSource = null;
+    }
   }
 
   // ── Submit ────────────────────────────────────────────────────────
@@ -179,8 +270,37 @@ export class AppComponent implements OnInit, AfterViewChecked, OnDestroy {
   // ── Helpers ───────────────────────────────────────────────────────
 
   private pushAssistantMessage(text: string, extractedFields: any, missingFields: string[], lang = 'vi'): void {
-    this.chatMessages.push({ role: 'assistant', text, extractedFields, missingFields, timestamp: new Date() });
+    // Stop any previous typing animation
+    if (this.typingTimer) {
+      clearInterval(this.typingTimer);
+      this.typingTimer = null;
+      // Finish any previously typing message
+      const prev = this.chatMessages.find(m => m.isTyping);
+      if (prev) { prev.displayText = prev.text; prev.isTyping = false; }
+    }
+
+    const msg: ChatMessage = {
+      role: 'assistant', text, displayText: '', isTyping: true,
+      extractedFields, missingFields, timestamp: new Date()
+    };
+    this.chatMessages.push(msg);
     this.shouldScrollChat = true;
+
+    // Typing animation: reveal characters over the duration of TTS
+    let charIndex = 0;
+    const charsPerTick = 2;
+    const intervalMs = 40;
+    this.typingTimer = setInterval(() => {
+      charIndex = Math.min(charIndex + charsPerTick, text.length);
+      msg.displayText = text.slice(0, charIndex);
+      this.shouldScrollChat = true;
+      if (charIndex >= text.length) {
+        clearInterval(this.typingTimer);
+        this.typingTimer = null;
+        msg.isTyping = false;
+      }
+    }, intervalMs);
+
     this.speak(text, lang);
   }
 
@@ -199,6 +319,15 @@ export class AppComponent implements OnInit, AfterViewChecked, OnDestroy {
     }).catch(() => {
       this.webSpeech.aiFinishedSpeaking();
     });
+  }
+
+  private finishTyping(): void {
+    if (this.typingTimer) {
+      clearInterval(this.typingTimer);
+      this.typingTimer = null;
+    }
+    const msg = this.chatMessages.find(m => m.isTyping);
+    if (msg) { msg.displayText = msg.text; msg.isTyping = false; }
   }
 
   /** Called when mic is open but user has been silent for inactivity threshold. */

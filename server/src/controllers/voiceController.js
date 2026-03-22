@@ -76,7 +76,7 @@ const parseContext = (contextPayload) => {
  * Body: { transcript: string, context?: object, language?: string }
  */
 exports.processText = async (req, res) => {
-  const { transcript, context: rawContext, language = 'vi' } = req.body || {};
+  const { transcript, context: rawContext, automationContext: rawAutoContext, language = 'vi' } = req.body || {};
 
   if (!transcript || !String(transcript).trim()) {
     return res.status(400).json({
@@ -86,9 +86,10 @@ exports.processText = async (req, res) => {
   }
 
   const context = parseContext(rawContext);
+  const automationContext = parseContext(rawAutoContext);
 
   try {
-    const payload = await aiService.extractInvoiceEntities(String(transcript).trim(), context);
+    const payload = await aiService.extractInvoiceEntities(String(transcript).trim(), context, automationContext);
     res.status(200).json({ transcript, ...payload, language });
   } catch (error) {
     console.error('Text processing failed', error);

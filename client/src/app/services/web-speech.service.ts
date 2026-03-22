@@ -52,6 +52,8 @@ export class WebSpeechService {
   private inactivityTimer: ReturnType<typeof setTimeout> | null = null;
   private pendingFinal = '';  // accumulate across recognition sessions in one turn
   private hasFiredFinal = false; // guard: only send once per turn
+  private silenceTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly SILENCE_DELAY_MS = 1800; // wait 1.8s of silence before sending
 
   // ── Public API ────────────────────────────────────────────────────
 
@@ -79,6 +81,7 @@ export class WebSpeechService {
     this.active = false;
     this.aiTalking = false;
     this.clearInactivityTimer();
+    this.clearSilenceTimer();
     this.recognition?.abort();
     this.recognition = null;
     this.pendingFinal = '';
@@ -91,6 +94,7 @@ export class WebSpeechService {
     this.aiTalking = true;
     this.state$.next('speaking');
     this.clearInactivityTimer();
+    this.clearSilenceTimer();
     // Ensure recognition is running so we can detect barge-in
     if (this.active && (!this.recognition || this.isRecognitionStopped())) {
       this.startRecognition();
@@ -131,7 +135,7 @@ export class WebSpeechService {
 
     const r = new SR();
     r.lang = this.lang;
-    r.continuous = false;       // auto-stops after one utterance — gives clean end detection
+    r.continuous = true;        // keep listening — we control when to send via silence timer
     r.interimResults = true;
     r.maxAlternatives = 1;
     this.recognition = r;
@@ -165,47 +169,37 @@ export class WebSpeechService {
       }
 
       if (interim) {
-        this.transcript$.next({ text: interim, isFinal: false });
+        this.transcript$.next({ text: (this.pendingFinal ? this.pendingFinal + ' ' : '') + interim, isFinal: false });
+        // User is still talking — reset silence timer
+        this.resetSilenceTimer();
       }
       if (finalText) {
         this.pendingFinal += (this.pendingFinal ? ' ' : '') + finalText;
         this.transcript$.next({ text: this.pendingFinal, isFinal: true });
+        // Got a final chunk but user might continue — start silence timer
+        this.resetSilenceTimer();
       }
     };
 
     r.onspeechend = () => {
-      // Speech ended — recognition will fire onend shortly with final result
+      // Speech paused — silence timer will handle sending if user doesn't continue
     };
 
     r.onend = () => {
       this.recognition = null;
       if (!this.active) return;
 
-      const text = this.pendingFinal.trim();
-
-      if (text && !this.hasFiredFinal) {
-        // We have a real final transcript — send it
-        this.hasFiredFinal = true;
-        this.state$.next('processing');
-        this.finalTranscript$.next(text);
-        this.pendingFinal = '';
-        // If AI is talking (barge-in just happened), restart recognition to keep listening
-        if (this.aiTalking) {
-          setTimeout(() => { if (this.active) this.startRecognition(); }, 150);
+      // continuous mode can still end (timeout, error) — restart if we haven't sent yet
+      if (!this.hasFiredFinal) {
+        if (this.pendingFinal.trim()) {
+          // We have accumulated text — start silence timer to send
+          this.resetSilenceTimer();
         }
-        return;
+        // Restart recognition to keep listening
+        setTimeout(() => {
+          if (this.active && !this.hasFiredFinal) this.startRecognition();
+        }, 150);
       }
-
-      // No result (no-speech, too short, noise) — restart and keep listening
-      this.pendingFinal = '';
-      this.hasFiredFinal = false;
-      if (!this.aiTalking) {
-        this.state$.next('listening');
-        this.resetInactivityTimer();
-      }
-      setTimeout(() => {
-        if (this.active) this.startRecognition();
-      }, 150);
     };
 
     r.onerror = (event: any) => {
@@ -234,6 +228,35 @@ export class WebSpeechService {
   private isRecognitionStopped(): boolean {
     // No reliable readyState on SpeechRecognition — assume stopped if null
     return this.recognition === null;
+  }
+
+  // ── Silence timer (delay before sending final transcript) ────────
+
+  private resetSilenceTimer(): void {
+    this.clearSilenceTimer();
+    this.silenceTimer = setTimeout(() => {
+      this.fireFinalTranscript();
+    }, this.SILENCE_DELAY_MS);
+  }
+
+  private clearSilenceTimer(): void {
+    if (this.silenceTimer !== null) {
+      clearTimeout(this.silenceTimer);
+      this.silenceTimer = null;
+    }
+  }
+
+  private fireFinalTranscript(): void {
+    this.clearSilenceTimer();
+    const text = this.pendingFinal.trim();
+    if (text && !this.hasFiredFinal) {
+      this.hasFiredFinal = true;
+      this.pendingFinal = '';
+      this.state$.next('processing');
+      this.finalTranscript$.next(text);
+      // Keep recognition running — don't abort. It will keep capturing
+      // if user speaks again (barge-in) or stay silent.
+    }
   }
 
   // ── Inactivity ────────────────────────────────────────────────────

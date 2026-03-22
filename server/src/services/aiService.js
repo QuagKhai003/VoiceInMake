@@ -1,13 +1,10 @@
 const { OpenAI, toFile } = require('openai');
 
-const HEADER_FIELDS = ['buyerName', 'taxId', 'vatNumber', 'buyerAddress', 'invoiceType', 'issueDate'];
-
 const getClient = () => {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     throw new Error('OPENAI_API_KEY is required for AI services');
   }
-
   return new OpenAI({ apiKey });
 };
 
@@ -20,50 +17,63 @@ const extractJson = (rawText) => {
   if (start === -1 || end === -1) {
     throw new Error('LLM response did not contain JSON');
   }
-  const jsonChunk = rawText.slice(start, end + 1);
-  return JSON.parse(jsonChunk);
+  return JSON.parse(rawText.slice(start, end + 1));
 };
 
 const systemPrompt = `
-Bạn là trợ lý tạo hóa đơn thông minh. Người dùng có thể nói tiếng Việt hoặc tiếng Anh, nhưng bạn LUÔN trả lời bằng tiếng Việt.
+Bạn là trợ lý hóa đơn. Người dùng nói tiếng Việt hoặc tiếng Anh, bạn LUÔN trả lời tiếng Việt.
 
-Nhiệm vụ của bạn:
-1. Trích xuất thông tin hóa đơn từ lời nói của người dùng
-2. Trả lời tự nhiên, thân thiện như một cuộc trò chuyện thật
+Bạn là chatbot hỗ trợ — KHÔNG phải form. Đừng hỏi dồn, đừng yêu cầu thông tin cụ thể, đừng liệt kê trường thiếu. Hãy ĐI THEO người dùng, không dẫn dắt họ.
 
-Trả về JSON với các trường:
-- extractedFields: object chứa các trường đã trích xuất:
-  - buyerName (string) — tên người mua / công ty
-  - taxId (string) — mã số thuế
-  - vatNumber (string) — số VAT
-  - buyerAddress (string) — địa chỉ người mua
-  - invoiceType (string) — loại hóa đơn (điện tử / giấy)
-  - issueDate (ISO 8601 date string) — ngày phát hành
-  - lineItems (array of { description, quantity, unitPrice, vatRate, lineTotal }) — hàng hóa / dịch vụ
-- assistantResponse (string) — câu trả lời tự nhiên bằng tiếng Việt
+Cách hoạt động:
+- Người dùng nói gì thì ghi nhận cái đó. Không hỏi thêm trừ khi họ yêu cầu.
+- Nếu người dùng đưa tên công ty → ghi nhận. Đưa mã số thuế → ghi nhận. Không cần hỏi ngược lại.
+- Xác nhận ngắn gọn (1 câu) rồi IM LẶNG chờ. Ví dụ: "Đã ghi nhận công ty ABC." hoặc "OK, mã số thuế 0123456789."
+- KHÔNG tự ý hỏi "Còn thông tin gì nữa không?" hay "Bạn có muốn thêm gì không?" liên tục
+- Nếu người dùng hỏi gì hoặc nói chuyện → trả lời bình thường
+- Nếu người dùng muốn điền hóa đơn trên web → hỏi URL, rồi hỏi đăng nhập
+- Khi có đủ URL + username + password → HỎI XÁC NHẬN trước, KHÔNG tự bắt đầu. Chờ người dùng nói đồng ý rồi mới start_automation.
+- Lưu ý: giọng nói có thể bị nhận sai. Nếu thấy từ lạ, cố đoán ý đúng từ ngữ cảnh.
 
-Quy tắc cho assistantResponse:
-- Nói chuyện tự nhiên, thân thiện, ngắn gọn (1-2 câu)
-- Nếu người dùng vừa cung cấp thông tin, xác nhận lại những gì bạn đã ghi nhận
-- Nếu còn thiếu thông tin, hỏi tiếp một cách tự nhiên (không liệt kê)
-- Nếu đủ thông tin, hỏi người dùng có muốn gửi hóa đơn không
-- Nếu người dùng nói chuyện phiếm hoặc hỏi gì đó, trả lời bình thường rồi quay lại hóa đơn
-- Hiểu số tiếng Việt: "nghìn"=1000, "triệu"=1000000, "phần trăm"=percent, "chiếc/cái"=đơn vị
+Trích xuất (chỉ ghi nhận thông tin MỚI trong câu nói hiện tại):
+- buyerName, taxId, vatNumber, buyerAddress, invoiceType, issueDate
+- lineItems: array of { description, quantity, unitPrice, vatRate, lineTotal }
+- BẤT KỲ trường nào khác người dùng đề cập
 
-Dùng null hoặc mảng rỗng cho các giá trị chưa có. Chỉ trả về JSON, không markdown.
+Trả về JSON duy nhất:
+{
+  "extractedFields": { ... chỉ trường MỚI ... },
+  "assistantResponse": "xác nhận ngắn gọn",
+  "intent": "chat" | "collect_automation" | "confirm_automation" | "start_automation",
+  "automationFields": { "websiteUrl": "", "username": "", "password": "" }
+}
+
+LOGIC CHỌN intent (QUAN TRỌNG — tuân thủ đúng):
+1. "chat" — mặc định, trò chuyện bình thường hoặc ghi nhận thông tin hóa đơn
+2. "collect_automation" — người dùng đề cập muốn điền trên web nhưng THIẾU 1 trong 3: websiteUrl, username, password. Hỏi thông tin còn thiếu.
+3. "confirm_automation" — automationFields ĐÃ CÓ ĐỦ cả 3 (websiteUrl + username + password) từ tin nhắn hiện tại HOẶC từ "Thông tin tự động hóa đã có" kết hợp. Bạn PHẢI dùng intent này và hỏi xác nhận. assistantResponse ví dụ: "Tôi đã có đủ thông tin: URL vinvoice.viettel.vn, tài khoản 0319080151. Bạn muốn bắt đầu tự động điền hóa đơn không?"
+4. "start_automation" — CHỈ dùng khi người dùng đã xác nhận sau confirm_automation (nói "bắt đầu", "ok", "đi", "được", "ừ", "yes", "start", "làm đi", "chạy đi" hoặc tương tự)
+
+QUY TẮC: Nếu trong automationFields bạn trả về đã có cả websiteUrl, username VÀ password → BẮT BUỘC dùng "confirm_automation", KHÔNG ĐƯỢC dùng "collect_automation".
+
+Hiểu số tiếng Việt: nghìn=1000, triệu=1000000, phần trăm=%, chiếc/cái=đơn vị.
+Dùng null cho giá trị không đề cập. Chỉ JSON, không markdown.
 `.trim();
 
-const buildUserPrompt = (transcript, context, missingFields) => {
-  const contextText = context && Object.keys(context).length ? JSON.stringify(context) : 'Chưa có thông tin nào';
-  const missingText = missingFields?.length ? missingFields.join(', ') : 'Không còn thiếu';
+const buildUserPrompt = (transcript, context, automationContext) => {
+  const contextText = context && Object.keys(context).length
+    ? JSON.stringify(context, null, 0)
+    : 'Chưa có thông tin nào';
+  const autoText = automationContext && Object.keys(automationContext).length
+    ? `\nThông tin tự động hóa đã có: ${JSON.stringify(automationContext)}`
+    : '';
+
   return `Người dùng nói: "${transcript}"
 
-Thông tin đã thu thập:
-${contextText}
+Thông tin đã thu thập trước đó:
+${contextText}${autoText}
 
-Trường còn thiếu: ${missingText}
-
-Trả về JSON với extractedFields và assistantResponse.`;
+Trả về JSON.`;
 };
 
 const parseDateValue = (value) => {
@@ -76,18 +86,13 @@ const parseDateValue = (value) => {
 };
 
 const normalizeNumber = (value) => {
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return value;
-  }
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
 };
 
 const normalizeLineItems = (items) => {
-  if (!Array.isArray(items)) {
-    return [];
-  }
-
+  if (!Array.isArray(items)) return [];
   return items
     .map((item) => ({
       description: item?.description?.trim() ?? '',
@@ -99,93 +104,48 @@ const normalizeLineItems = (items) => {
     .filter((item) => item.description || item.quantity || item.unitPrice || item.lineTotal);
 };
 
-const normalizeHeaderValue = (value) => {
-  if (value === null || value === undefined) {
-    return '';
-  }
+const normalizeValue = (value) => {
+  if (value === null || value === undefined) return '';
   return String(value).trim();
 };
 
-const normalizeEntities = (source = {}) => ({
-  buyerName: normalizeHeaderValue(source?.buyerName),
-  taxId: normalizeHeaderValue(source?.taxId),
-  vatNumber: normalizeHeaderValue(source?.vatNumber),
-  buyerAddress: normalizeHeaderValue(source?.buyerAddress),
-  invoiceType: normalizeHeaderValue(source?.invoiceType),
-  issueDate: parseDateValue(source?.issueDate),
-  lineItems: normalizeLineItems(source?.lineItems)
-});
+// Merge new extracted fields into existing context — only overwrite non-empty new values
+const mergeIntoContext = (existing = {}, newFields = {}) => {
+  const merged = { ...existing };
 
-const mergeContexts = (context = {}, extracted = {}) => {
-  const normalizedContext = normalizeEntities(context);
-  const normalizedExtracted = normalizeEntities(extracted);
-
-  const merged = {};
-  for (const field of HEADER_FIELDS) {
-    merged[field] = normalizedExtracted[field] || normalizedContext[field] || '';
+  for (const [key, value] of Object.entries(newFields)) {
+    if (key === 'lineItems') {
+      const items = normalizeLineItems(value);
+      if (items.length) merged.lineItems = items;
+    } else if (key === 'issueDate') {
+      const date = parseDateValue(value);
+      if (date) merged.issueDate = date;
+    } else if (value !== null && value !== undefined && String(value).trim()) {
+      merged[key] = normalizeValue(value);
+    }
   }
-
-  merged.lineItems = normalizedExtracted.lineItems.length
-    ? normalizedExtracted.lineItems
-    : normalizedContext.lineItems;
 
   return merged;
-};
-
-const determineMissingFields = (entities = {}) => {
-  const missing = HEADER_FIELDS.filter((field) => !String(entities[field] ?? '').trim());
-  if (!entities.lineItems?.length) {
-    missing.push('lineItems');
-  }
-  return missing;
-};
-
-
-const shouldSubmitNow = (transcript = '') => {
-  const value = String(transcript).toLowerCase();
-  return /\b(submit|send|finalize|finish|done)\b/.test(value) ||
-    /gửi hóa đơn|gửi hoá đơn|xác nhận|hoàn tất|xong rồi|gửi đi/.test(value);
-};
-
-const buildIntent = (missingFields = [], transcript = '') => {
-  if (missingFields.length) {
-    return 'collect_more';
-  }
-  return shouldSubmitNow(transcript) ? 'submit' : 'confirm';
-};
-
-const buildConfidence = (missingFields = []) => {
-  const total = HEADER_FIELDS.length + 1;
-  const ratio = Math.min(missingFields.length / total, 1);
-  return Number((1 - ratio).toFixed(2));
 };
 
 exports.transcribeAudio = async (buffer, filename = 'audio.webm', mimeType = 'audio/webm', language = 'vi') => {
   const client = getClient();
   const file = await toFile(buffer, filename, { type: mimeType });
   const transcriptionOptions = { file, model: 'whisper-1' };
-  // Pass language hint to Whisper for faster, more accurate transcription
-  // 'auto' means let Whisper detect; otherwise pass ISO 639-1 code (vi, en, etc.)
   if (language && language !== 'auto') {
     transcriptionOptions.language = language;
   }
   const transcription = await client.audio.transcriptions.create(transcriptionOptions);
-
   if (!transcription?.text) {
     throw new Error('Whisper did not return any transcription text');
   }
-
   return transcription.text.trim();
 };
 
-exports.extractInvoiceEntities = async (transcript, context = {}) => {
+exports.extractInvoiceEntities = async (transcript, context = {}, automationContext = {}) => {
   if (!transcript) {
     throw new Error('Transcript is required for extraction');
   }
-
-  // Pre-compute missing fields from current context to inform GPT
-  const currentEntities = normalizeEntities(context);
-  const currentMissing = determineMissingFields(currentEntities);
 
   const client = getClient();
   const completion = await client.chat.completions.create({
@@ -193,40 +153,23 @@ exports.extractInvoiceEntities = async (transcript, context = {}) => {
     temperature: 0.7,
     messages: [
       { role: 'system', content: systemPrompt },
-      { role: 'user', content: buildUserPrompt(transcript, context, currentMissing) }
+      { role: 'user', content: buildUserPrompt(transcript, context, automationContext) }
     ]
   });
 
   const rawText = completion?.choices?.[0]?.message?.content ?? '';
   const parsed = extractJson(rawText);
-  const extracted = parsed.extractedFields || parsed;
-  const mergedEntities = mergeContexts(context, extracted);
-  const missingFields = determineMissingFields(mergedEntities);
-  const intent = buildIntent(missingFields, transcript);
-  const confidence = buildConfidence(missingFields);
-
-  // Use GPT-generated response, fall back to simple prompt if missing
-  const assistantResponse = parsed.assistantResponse ||
-    (missingFields.length ? 'Bạn có thể cho tôi biết thêm thông tin không?' : 'Đã đủ thông tin. Bạn có muốn gửi hóa đơn không?');
-
-  const normalizedContext = {
-    ...mergedEntities,
-    assistantMetadata: {
-      missingFields,
-      confidence,
-      intent,
-      lastQuestion: assistantResponse
-    }
-  };
+  const newFields = parsed.extractedFields || {};
+  const mergedEntities = mergeIntoContext(context, newFields);
+  const intent = parsed.intent || 'chat';
+  const automationFields = parsed.automationFields || {};
+  const assistantResponse = parsed.assistantResponse || 'Tôi đã ghi nhận. Bạn muốn tiếp tục thế nào?';
 
   return {
     extractedEntities: mergedEntities,
-    normalizedContext,
-    missingFields,
     assistantResponse,
-    intent,
-    confidence,
-    lastQuestion: assistantResponse
+    automationFields,
+    intent
   };
 };
 

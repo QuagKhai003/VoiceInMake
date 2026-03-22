@@ -46,7 +46,7 @@
           <div class="bubble" *ngIf="msg.role === 'assistant'">
             <span class="bubble-icon">🤖</span>
             <div class="bubble-body">
-              <p class="bubble-text">{{ msg.text }}</p>
+              <p class="bubble-text">{{ msg.displayText ?? msg.text }}<span class="typing-cursor" *ngIf="msg.isTyping"></span></p>
 
               <!-- Extracted fields inline -->
               <div class="extracted-pills" *ngIf="extractedEntries(msg.extractedFields).length">
@@ -88,15 +88,19 @@
           </div>
         </div>
 
-        <!-- Speaking indicator while TTS plays -->
-        <div class="message assistant" *ngIf="isSpeaking">
-          <div class="bubble">
-            <span class="bubble-icon">🔊</span>
-            <div class="bubble-body">
-              <p class="bubble-text speaking-text">Đang nói...</p>
-            </div>
-          </div>
-        </div>
+      </div>
+      <!-- Text input -->
+      <div class="text-input-bar">
+        <input
+          type="text"
+          class="chat-input"
+          [(ngModel)]="textInput"
+          (keydown.enter)="sendTextInput()"
+          placeholder="Nhập tin nhắn hoặc sửa thông tin..."
+          [disabled]="assistantState === 'Processing'" />
+        <button class="send-btn" (click)="sendTextInput()" [disabled]="!textInput.trim() || assistantState === 'Processing'">
+          ➤
+        </button>
       </div>
     </main>
 
@@ -128,13 +132,21 @@
 
     <app-voice-interface
       [currentContext]="masterContext"
+      [automationContext]="automationContext"
       (aiResponse)="handleAiResponse($event)"
       (stateChange)="handleStateChange($event)"
       (interimTranscript)="handleInterimTranscript($event)">
     </app-voice-interface>
 
+    <!-- Automation status -->
+    <div class="automation-bar" *ngIf="automationRunning">
+      <span class="automation-indicator"></span>
+      <span class="automation-text">{{ automationStatus }}</span>
+      <button class="automation-stop" (click)="stopAutomation()">Dừng</button>
+    </div>
+
     <!-- Recommended next action -->
-    <div class="next-action" *ngIf="recommendedActions.length && assistantState !== 'Processing'">
+    <div class="next-action" *ngIf="!automationRunning && recommendedActions.length && assistantState !== 'Processing'">
       <span class="next-label">Gợi ý:</span>
       <span class="next-text">{{ recommendedActions[0]?.userCommand }}</span>
     </div>
