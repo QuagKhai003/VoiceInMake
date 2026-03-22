@@ -89,6 +89,7 @@
         </div>
 
       </div>
+
       <!-- Text input -->
       <div class="text-input-bar">
         <input
@@ -96,9 +97,9 @@
           class="chat-input"
           [(ngModel)]="textInput"
           (keydown.enter)="sendTextInput()"
-          placeholder="Nhập tin nhắn hoặc sửa thông tin..."
-          [disabled]="assistantState === 'Processing'" />
-        <button class="send-btn" (click)="sendTextInput()" [disabled]="!textInput.trim() || assistantState === 'Processing'">
+          [placeholder]="automationRunning ? 'Nhập hướng dẫn cho trình duyệt...' : 'Nhập tin nhắn hoặc sửa thông tin...'"
+          [disabled]="assistantState === 'Processing' && !automationRunning" />
+        <button class="send-btn" (click)="sendTextInput()" [disabled]="!textInput.trim() || (assistantState === 'Processing' && !automationRunning)">
           ➤
         </button>
       </div>

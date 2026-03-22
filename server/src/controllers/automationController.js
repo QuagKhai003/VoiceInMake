@@ -26,6 +26,23 @@ exports.start = async (req, res) => {
 };
 
 /**
+ * POST /api/automation/instruct
+ * Body: { message: string }
+ */
+exports.instruct = async (req, res) => {
+  const { message } = req.body || {};
+  if (!message || typeof message !== 'string') {
+    return res.status(400).json({ message: 'message is required.' });
+  }
+  const agent = getAgent();
+  if (!agent.running) {
+    return res.status(409).json({ message: 'Không có tự động hóa đang chạy.' });
+  }
+  agent.injectMessage(message.trim());
+  res.status(200).json({ message: 'Đã nhận hướng dẫn.' });
+};
+
+/**
  * POST /api/automation/stop
  */
 exports.stop = async (req, res) => {
