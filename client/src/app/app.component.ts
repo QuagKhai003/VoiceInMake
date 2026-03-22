@@ -115,13 +115,23 @@ export class AppComponent implements OnInit, AfterViewChecked, OnDestroy {
     const text = this.textInput.trim();
     if (!text) return;
     this.textInput = '';
-    this.assistantState = 'Processing';
     this.chatMessages.push({ role: 'user', text, timestamp: new Date() });
     this.shouldScrollChat = true;
 
+    // If automation is running, send as instruction to the agent
+    if (this.automationRunning) {
+      this.apiService.sendInstruction(text).subscribe({
+        error: (err) => {
+          this.pushSystemMessage(`❌ ${err.error?.message || err.message || 'Lỗi gửi hướng dẫn'}`);
+        }
+      });
+      return;
+    }
+
+    this.assistantState = 'Processing';
     this.apiService.processText(text, this.masterContext, 'vi', this.automationContext).subscribe({
       next: (response) => {
-        this.handleAiResponse({ ...response, transcript: undefined }); // don't duplicate user msg
+        this.handleAiResponse({ ...response, transcript: undefined });
       },
       error: (err) => {
         this.pushSystemMessage(`❌ ${err.error?.message || err.message || 'Lỗi xử lý'}`);
@@ -133,6 +143,17 @@ export class AppComponent implements OnInit, AfterViewChecked, OnDestroy {
   // ── Voice events ──────────────────────────────────────────────────
 
   handleAiResponse(response: any): void {
+    // If automation is running and we got a voice transcript, forward it as instruction
+    if (this.automationRunning && response.transcript) {
+      this.chatMessages.push({ role: 'user', text: response.transcript, timestamp: new Date() });
+      this.liveInterimText = '';
+      this.liveInterimFinal = false;
+      this.shouldScrollChat = true;
+      this.apiService.sendInstruction(response.transcript).subscribe();
+      this.webSpeech.processingDone();
+      return;
+    }
+
     if (response.transcript) {
       this.lastTranscript = response.transcript;
       this.liveInterimText = '';
@@ -197,7 +218,21 @@ export class AppComponent implements OnInit, AfterViewChecked, OnDestroy {
     this.assistantState = 'Processing';
     this.pushAssistantMessage('Đang bắt đầu tự động điền hóa đơn trên website...', {}, []);
 
-    // Start SSE listener
+    // Trigger the automation FIRST, then connect SSE (so resetAgent() runs before getAgent())
+    this.apiService.startAutomation(websiteUrl, { username, password }, this.masterContext).subscribe({
+      next: () => {
+        // Now connect SSE — agent is already created by resetAgent()
+        this.connectAutomationSSE();
+      },
+      error: (err) => {
+        this.pushSystemMessage(`❌ Lỗi: ${err.error?.message || err.message}`);
+        this.automationRunning = false;
+        this.assistantState = 'Idle';
+      }
+    });
+  }
+
+  private connectAutomationSSE(): void {
     this.eventSource = this.apiService.automationEvents();
     this.eventSource.onmessage = (event) => {
       const data = JSON.parse(event.data);
@@ -206,6 +241,9 @@ export class AppComponent implements OnInit, AfterViewChecked, OnDestroy {
 
       if (data.event === 'status' || data.event === 'action') {
         this.pushSystemMessage(`🤖 ${data.status}`);
+      } else if (data.event === 'ask_user') {
+        this.pushAssistantMessage(data.question || data.status, {}, [], 'vi');
+        this.assistantState = 'Needs Info';
       } else if (data.event === 'done') {
         this.pushAssistantMessage(data.status, {}, []);
         this.stopAutomationListener();
@@ -217,17 +255,9 @@ export class AppComponent implements OnInit, AfterViewChecked, OnDestroy {
     };
     this.eventSource.onerror = () => {
       this.stopAutomationListener();
+      this.automationRunning = false;
+      this.assistantState = 'Idle';
     };
-
-    // Trigger the automation
-    this.apiService.startAutomation(websiteUrl, { username, password }, this.masterContext).subscribe({
-      error: (err) => {
-        this.pushSystemMessage(`❌ Lỗi: ${err.error?.message || err.message}`);
-        this.stopAutomationListener();
-        this.automationRunning = false;
-        this.assistantState = 'Idle';
-      }
-    });
   }
 
   stopAutomation(): void {

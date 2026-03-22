@@ -11,35 +11,47 @@ const SYSTEM_PROMPT = `
 Bạn là một AI agent điều khiển trình duyệt web để tự động điền hóa đơn.
 Bạn nhận ảnh chụp màn hình của trang web và trả về hành động tiếp theo dưới dạng JSON.
 
-Quy tắc:
+QUAN TRỌNG — Bạn chỉ thực hiện MỘT hành động mỗi lần. Hãy chọn hành động ĐÚNG THỨ TỰ:
+
+Quy tắc đăng nhập (PHẢI tuân thủ):
+1. Điền tên đăng nhập TRƯỚC
+2. Điền mật khẩu SAU
+3. CHỈ nhấn nút đăng nhập SAU KHI đã điền CẢ username VÀ password
+4. Nếu trong lịch sử đã có "type" cho username nhưng CHƯA có "type" cho password → bước tiếp theo PHẢI là điền password, KHÔNG ĐƯỢC nhấn đăng nhập
+5. Nếu đăng nhập thất bại (thông báo lỗi, form đăng nhập vẫn hiển thị sau khi đã nhấn) → dùng "ask_user" để hỏi người dùng thông tin đăng nhập đúng. KHÔNG thử lại cùng credentials.
+
+Quy tắc chung:
 - Luôn trả về JSON duy nhất, không markdown
 - Phân tích kỹ ảnh chụp màn hình để xác định trạng thái trang
-- Nếu thấy form đăng nhập, điền thông tin đăng nhập
 - Nếu thấy trang chủ/dashboard, tìm nút hoặc link tạo hóa đơn mới
 - Nếu thấy form hóa đơn, điền từng trường một
 - Nếu thấy nút submit/gửi, nhấn nó
+- Nếu gặp khó khăn, bị kẹt, hoặc không chắc chắn → dùng action "ask_user" để hỏi người dùng. ĐỪNG lặp lại cùng một hành động thất bại.
+- Nếu thấy popup, captcha, OTP, hoặc xác thực 2 bước → dùng "ask_user" để thông báo người dùng
 
 Trả về JSON với cấu trúc:
 {
-  "action": "click" | "type" | "select" | "scroll" | "wait" | "done" | "error",
+  "action": "click" | "type" | "select" | "scroll" | "wait" | "done" | "error" | "ask_user",
   "target": "mô tả element bằng text/placeholder/label mà bạn thấy trên màn hình",
   "value": "giá trị cần nhập (cho action type/select)",
   "reasoning": "giải thích ngắn gọn bằng tiếng Việt tại sao chọn hành động này",
-  "status": "mô tả ngắn gọn trạng thái hiện tại bằng tiếng Việt"
+  "status": "mô tả ngắn gọn trạng thái hiện tại bằng tiếng Việt",
+  "question": "câu hỏi cho người dùng (chỉ dùng khi action là ask_user)"
 }
 
-Khi action là "done": có nghĩa là đã hoàn thành việc điền hóa đơn.
-Khi action là "error": có nghĩa là gặp lỗi không thể tiếp tục.
+Khi action là "done": đã hoàn thành việc điền hóa đơn.
+Khi action là "error": gặp lỗi không thể tiếp tục.
+Khi action là "ask_user": cần hỏi người dùng để tiếp tục (ví dụ: không biết chọn loại hóa đơn nào, không tìm thấy nút, trang web yêu cầu thông tin bạn không có).
 `.trim();
 
-const buildPrompt = (phase, invoiceData, credentials, currentUrl) => {
+const buildPrompt = (phase, invoiceData, credentials, currentUrl, userInstructions, actionHistory) => {
   let context = `URL hiện tại: ${currentUrl}\n`;
 
   if (phase === 'login') {
     context += `\nGiai đoạn: ĐĂNG NHẬP
-Tên đăng nhập: ${credentials.username}
-Mật khẩu: ${credentials.password}
-Hãy tìm form đăng nhập và điền thông tin.`;
+Tên đăng nhập (mới nhất): ${credentials.username}
+Mật khẩu (mới nhất): ${credentials.password}
+Hãy tìm form đăng nhập và điền thông tin. Nếu trường đã có giá trị cũ, XÓA và điền lại giá trị mới.`;
   } else if (phase === 'navigate') {
     context += `\nGiai đoạn: TÌM TRANG TẠO HÓA ĐƠN
 Hãy tìm nút/link để tạo hóa đơn mới. Tìm các từ như: "Tạo hóa đơn", "New invoice", "Lập hóa đơn", "Create", "+", "Thêm mới".`;
@@ -58,6 +70,20 @@ Tìm các trường input tương ứng và điền thông tin. Điền từng t
 Nếu đã điền hết tất cả, tìm nút gửi/submit và nhấn, sau đó trả về action "done".`;
   }
 
+  // Include action history so AI knows what was already tried
+  if (actionHistory && actionHistory.length > 0) {
+    const recent = actionHistory.slice(-5); // last 5 actions
+    context += `\n\nLịch sử hành động gần đây (${recent.length} bước cuối):`;
+    recent.forEach((h, i) => {
+      context += `\n${i + 1}. ${h.action} → "${h.target || ''}" ${h.success ? '✓' : '✗ ' + (h.error || '')}`;
+    });
+    context += `\n\nQUAN TRỌNG: Nếu bạn đã thử đăng nhập và thấy lỗi hoặc form đăng nhập vẫn hiện → thông tin đăng nhập SAI. Dùng "ask_user" để hỏi người dùng cung cấp thông tin đăng nhập đúng. KHÔNG thử lại cùng credentials.`;
+  }
+
+  if (userInstructions) {
+    context += `\n\n⚠️ HƯỚNG DẪN TỪ NGƯỜI DÙNG (ưu tiên cao nhất):\n${userInstructions}`;
+  }
+
   return context;
 };
 
@@ -66,9 +92,15 @@ class BrowserAgent {
     this.browser = null;
     this.page = null;
     this.running = false;
-    this.listeners = [];    // SSE listeners
-    this.maxSteps = 30;
+    this.listeners = [];
+    this.maxSteps = 50;
+    // User interaction
+    this.userMessages = [];
+    this.waitingForUser = false;
+    this.userResolve = null;
   }
+
+  // ── SSE listeners ──────────────────────────────────────────────
 
   addListener(res) {
     this.listeners.push(res);
@@ -80,10 +112,80 @@ class BrowserAgent {
 
   emit(event, data) {
     const payload = `data: ${JSON.stringify({ event, ...data })}\n\n`;
+    console.log(`[BrowserAgent] emit: ${event} → ${data.status || data.question || ''} (listeners: ${this.listeners.length})`);
     this.listeners.forEach(res => {
-      try { res.write(payload); } catch {}
+      try { res.write(payload); } catch (e) {
+        console.error('[BrowserAgent] SSE write failed:', e.message);
+      }
     });
   }
+
+  // ── User instruction injection ─────────────────────────────────
+
+  injectMessage(text) {
+    this.userMessages.push(text);
+    this.emit('status', { status: `📝 Đã nhận hướng dẫn: "${text}"` });
+
+    // Try to extract new credentials from user message
+    this.parseCredentials(text);
+
+    // If agent is paused waiting for user, unpause it
+    if (this.waitingForUser && this.userResolve) {
+      this.waitingForUser = false;
+      this.userResolve();
+      this.userResolve = null;
+    }
+  }
+
+  parseCredentials(text) {
+    if (!this.credentials) return;
+
+    const clean = (s) => s.replace(/[,.\s]+$/, '').trim();
+
+    // Match patterns like: tài khoản là X, username là X, tk: X, tk X
+    const userMatch = text.match(/(?:tài khoản|tai khoan|username|user|tk|tên đăng nhập|ten dang nhap)\s*(?:là|la|:|=)?\s*(\S+)/i);
+    if (userMatch) {
+      const val = clean(userMatch[1]);
+      if (val && val.length > 0) {
+        this.credentials.username = val;
+        this.emit('status', { status: `Đã cập nhật tài khoản: ${val}` });
+        console.log('[BrowserAgent] Updated username to:', val);
+      }
+    }
+
+    // Match patterns like: mật khẩu là X, password là X, mk: X, pass X
+    const passMatch = text.match(/(?:mật khẩu|mat khau|password|pass|mk)\s*(?:là|la|:|=)?\s*(\S+)/i);
+    if (passMatch) {
+      const val = clean(passMatch[1]);
+      if (val && val.length > 0) {
+        this.credentials.password = val;
+        this.emit('status', { status: `Đã cập nhật mật khẩu.` });
+        console.log('[BrowserAgent] Updated password to:', val);
+      }
+    }
+  }
+
+  waitForUser(question, timeoutMs = 60000) {
+    this.waitingForUser = true;
+    this.emit('ask_user', { status: question, question });
+
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        if (this.waitingForUser) {
+          this.waitingForUser = false;
+          this.userResolve = null;
+          resolve(false); // timed out
+        }
+      }, timeoutMs);
+
+      this.userResolve = () => {
+        clearTimeout(timer);
+        resolve(true); // user responded
+      };
+    });
+  }
+
+  // ── Browser interaction ────────────────────────────────────────
 
   async takeScreenshot() {
     if (!this.page) throw new Error('No page');
@@ -91,7 +193,7 @@ class BrowserAgent {
     return buffer.toString('base64');
   }
 
-  async askAI(screenshotBase64, phase, invoiceData, credentials) {
+  async askAI(screenshotBase64, phase, invoiceData, credentials, userInstructions = '', actionHistory = []) {
     const client = getClient();
     const currentUrl = this.page ? this.page.url() : 'unknown';
 
@@ -104,7 +206,7 @@ class BrowserAgent {
         {
           role: 'user',
           content: [
-            { type: 'text', text: buildPrompt(phase, invoiceData, credentials, currentUrl) },
+            { type: 'text', text: buildPrompt(phase, invoiceData, credentials, currentUrl, userInstructions, actionHistory) },
             { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${screenshotBase64}`, detail: 'high' } }
           ]
         }
@@ -123,7 +225,6 @@ class BrowserAgent {
 
     switch (type) {
       case 'click': {
-        // Try multiple strategies to find the element
         let el = this.page.getByRole('button', { name: new RegExp(target, 'i') });
         if (await el.count() === 0) el = this.page.getByRole('link', { name: new RegExp(target, 'i') });
         if (await el.count() === 0) el = this.page.getByText(target, { exact: false });
@@ -174,86 +275,158 @@ class BrowserAgent {
 
       case 'done':
       case 'error':
+      case 'ask_user':
         return type;
 
       default:
         throw new Error(`Unknown action: ${type}`);
     }
 
-    await this.page.waitForTimeout(1000); // let page settle
+    await this.page.waitForTimeout(1000);
     return 'continue';
   }
+
+  // ── Main automation loop ───────────────────────────────────────
 
   async run({ websiteUrl, credentials, invoiceData }) {
     if (this.running) throw new Error('Agent is already running');
     this.running = true;
+    this.credentials = { ...credentials }; // mutable copy so user can update
 
     try {
       this.emit('status', { status: 'Đang mở trình duyệt...' });
 
-      // Launch Playwright Chromium — visible window via WSLg on WSL2
       this.browser = await chromium.launch({ headless: false });
       const context = await this.browser.newContext({ viewport: { width: 1280, height: 800 } });
       this.page = await context.newPage();
 
-      // Ensure URL has protocol
       const url = websiteUrl.match(/^https?:\/\//) ? websiteUrl : `https://${websiteUrl}`;
 
-      // Phase 1: Navigate to website
       this.emit('status', { status: `Đang truy cập ${url}...` });
       await this.page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
       await this.page.waitForTimeout(2000);
 
-      // Phase 2: Login
       let phase = 'login';
       let step = 0;
+      let consecutiveErrors = 0;
+      const actionHistory = []; // track what was tried
+      let loginAttempts = 0;
 
       while (step < this.maxSteps && this.running) {
         step++;
+
+        // Drain any queued user messages
+        const userInstructions = this.userMessages.splice(0).join('\n');
+
+        // If user provided new instructions, reset login attempts (they may have given new credentials)
+        if (userInstructions && phase === 'login') {
+          loginAttempts = 0;
+        }
+
         this.emit('status', { status: `Bước ${step}: Đang phân tích trang (${phase})...`, phase, step });
 
-        const screenshot = await this.takeScreenshot();
-        this.emit('screenshot', { screenshot, step });
+        let screenshot;
+        try {
+          screenshot = await this.takeScreenshot();
+        } catch (err) {
+          this.emit('error', { status: `Không thể chụp màn hình: ${err.message}` });
+          break;
+        }
 
         let action;
         try {
-          action = await this.askAI(screenshot, phase, invoiceData, credentials);
+          action = await this.askAI(screenshot, phase, invoiceData, this.credentials, userInstructions, actionHistory);
         } catch (err) {
           this.emit('error', { status: `Lỗi AI: ${err.message}`, step });
-          continue;
+          const responded = await this.waitForUser(`Gặp lỗi khi phân tích: ${err.message}. Bạn có muốn thử lại không?`);
+          if (responded && this.running) { consecutiveErrors = 0; continue; }
+          break;
         }
 
         this.emit('action', { status: action.status || action.reasoning, action: action.action, target: action.target, step });
+
+        // ── Handle terminal / interactive actions ──
 
         if (action.action === 'done') {
           this.emit('done', { status: 'Hoàn thành! Đã điền xong hóa đơn.', step });
           break;
         }
 
-        if (action.action === 'error') {
-          this.emit('error', { status: `Lỗi: ${action.reasoning}`, step });
+        if (action.action === 'ask_user') {
+          const question = action.question || action.reasoning || 'Tôi cần hướng dẫn từ bạn để tiếp tục.';
+          actionHistory.push({ action: 'ask_user', target: question, success: true });
+          const responded = await this.waitForUser(question);
+          if (responded && this.running) { consecutiveErrors = 0; continue; }
+          this.emit('error', { status: 'Không nhận được phản hồi. Dừng tự động hóa.', step });
           break;
+        }
+
+        if (action.action === 'error') {
+          consecutiveErrors++;
+          const errorMsg = action.reasoning || 'Gặp lỗi không xác định.';
+          actionHistory.push({ action: 'error', target: errorMsg, success: false, error: errorMsg });
+          const responded = await this.waitForUser(`Gặp vấn đề: ${errorMsg}. Bạn muốn tôi làm gì tiếp?`);
+          if (responded && this.running) { consecutiveErrors = 0; continue; }
+          this.emit('error', { status: `Dừng do lỗi: ${errorMsg}`, step });
+          break;
+        }
+
+        // Track login button clicks
+        if (phase === 'login' && action.action === 'click') {
+          const t = (action.target || '').toLowerCase();
+          if (t.includes('login') || t.includes('đăng nhập') || t.includes('sign in') || t.includes('submit')) {
+            loginAttempts++;
+          }
         }
 
         try {
           await this.executeAction(action);
+          consecutiveErrors = 0;
+          actionHistory.push({ action: action.action, target: action.target, value: action.value, success: true });
         } catch (err) {
+          consecutiveErrors++;
+          actionHistory.push({ action: action.action, target: action.target, success: false, error: err.message });
           this.emit('error', { status: `Không thể thực hiện: ${err.message}`, step });
-          // Take new screenshot and retry with AI
+          if (consecutiveErrors >= 3) {
+            const responded = await this.waitForUser(`Gặp lỗi liên tục khi thực hiện hành động. Bạn có gợi ý gì không?`);
+            if (responded && this.running) { consecutiveErrors = 0; continue; }
+            break;
+          }
           continue;
         }
 
-        // Determine phase transitions
+        // ── Phase transitions based on actual page state ──
         const currentUrl = this.page.url();
+
         if (phase === 'login') {
-          // After a few login steps, check if we moved past login
-          if (step > 3 || !currentUrl.includes('login')) {
+          // Detect login failure: still on login page after clicking login button
+          if (loginAttempts >= 2) {
+            // Tried logging in twice and still here — credentials are wrong
+            this.emit('error', { status: 'Đăng nhập thất bại. Có thể sai tài khoản hoặc mật khẩu.', step });
+            const responded = await this.waitForUser('Đăng nhập không thành công. Vui lòng cung cấp tài khoản và mật khẩu đúng. Ví dụ: "tài khoản là ABC mật khẩu là XYZ"');
+            if (responded && this.running) {
+              loginAttempts = 0;
+              consecutiveErrors = 0;
+              // Clear login action history so AI starts fresh
+              actionHistory.length = 0;
+              // Reload page to get clean login form
+              this.emit('status', { status: 'Đang tải lại trang đăng nhập với thông tin mới...' });
+              try {
+                await this.page.reload({ waitUntil: 'domcontentloaded', timeout: 15000 });
+                await this.page.waitForTimeout(2000);
+              } catch {}
+              continue;
+            }
+            break;
+          }
+          // Check if we actually left the login page
+          if (!currentUrl.includes('login') && !currentUrl.includes('signin') && !currentUrl.includes('auth')) {
             phase = 'navigate';
             this.emit('status', { status: 'Đăng nhập thành công! Đang tìm trang tạo hóa đơn...', phase, step });
           }
         } else if (phase === 'navigate') {
-          // After clicking a create invoice link, switch to fill
-          if (step > 8 || currentUrl.includes('invoice') || currentUrl.includes('create') || currentUrl.includes('new')) {
+          // Check if URL suggests we found an invoice page
+          if (currentUrl.includes('invoice') || currentUrl.includes('create') || currentUrl.includes('new') || currentUrl.includes('hoadon')) {
             phase = 'fill';
             this.emit('status', { status: 'Đã tìm thấy form hóa đơn! Đang điền thông tin...', phase, step });
           }
@@ -265,8 +438,12 @@ class BrowserAgent {
       }
 
     } catch (err) {
+      console.error('[BrowserAgent] Unhandled error:', err.message);
       this.emit('error', { status: `Lỗi: ${err.message}` });
     } finally {
+      console.log('[BrowserAgent] Loop ended. running:', this.running, 'listeners:', this.listeners.length);
+      // Emit done signal so frontend knows automation ended
+      this.emit('done', { status: 'Tự động hóa đã kết thúc.' });
       await this.cleanup();
     }
   }
@@ -279,6 +456,13 @@ class BrowserAgent {
 
   async cleanup() {
     this.running = false;
+    // Unblock any pending waitForUser
+    if (this.userResolve) {
+      this.userResolve();
+      this.userResolve = null;
+    }
+    this.waitingForUser = false;
+    this.userMessages = [];
     try {
       if (this.browser) {
         await this.browser.close();

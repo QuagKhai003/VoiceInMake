@@ -54,6 +54,10 @@ export class ApiService {
     return this.http.post(`${this.baseUrl}/automation/start`, { websiteUrl, credentials, invoiceData });
   }
 
+  sendInstruction(message: string): Observable<any> {
+    return this.http.post(`${this.baseUrl}/automation/instruct`, { message });
+  }
+
   stopAutomation(): Observable<any> {
     return this.http.post(`${this.baseUrl}/automation/stop`, {});
   }
